@@ -30,9 +30,11 @@ export class PhillipsSpectrum implements InitialSpectrum {
     readonly tileSize;
 
     readonly settings = {
-        windTheta: 0.0,
-        windSpeed: 31.0,
-        smallWaveLengthCutOff: 0.01
+        windTheta: 0.35,
+        windSpeed: 38.0,
+        amplitude: 0.9,
+        smallWaveLengthCutOff: 0.05,
+        oppositeWaveSuppression: 0.06
     };
 
     constructor(textureSize: number, tileSize: number, engine: AbstractEngine) {
@@ -62,27 +64,37 @@ export class PhillipsSpectrum implements InitialSpectrum {
         this.uniformBuffer.addUniform("tileSize", 1);
         this.uniformBuffer.addUniform("windTheta", 1);
         this.uniformBuffer.addUniform("windSpeed", 1);
+        this.uniformBuffer.addUniform("amplitude", 1);
         this.uniformBuffer.addUniform("smallWaveLengthCutOff", 1);
+        this.uniformBuffer.addUniform("oppositeWaveSuppression", 1);
 
         this.computeShader.setStorageTexture("H0", this.h0);
         this.computeShader.setTexture("Noise", this.gaussianNoise, false);
         this.computeShader.setUniformBuffer("params", this.uniformBuffer);
 
-        this.uniformBuffer.updateInt("textureSize", this.textureSize);
-        this.uniformBuffer.updateFloat("tileSize", this.tileSize);
-        this.uniformBuffer.updateFloat("windTheta", this.settings.windTheta);
-        this.uniformBuffer.updateFloat("windSpeed", this.settings.windSpeed);
-        this.uniformBuffer.updateFloat("smallWaveLengthCutOff", this.settings.smallWaveLengthCutOff);
-
-        this.uniformBuffer.update();
+        this.syncSettingsToGPU();
 
         this.computeShader.dispatchWhenReady(Math.ceil(this.textureSize / 8), Math.ceil(this.textureSize / 8), 1);
     }
 
+    private syncSettingsToGPU() {
+        this.uniformBuffer.updateInt("textureSize", this.textureSize);
+        this.uniformBuffer.updateFloat("tileSize", this.tileSize);
+        this.uniformBuffer.updateFloat("windTheta", this.settings.windTheta);
+        this.uniformBuffer.updateFloat("windSpeed", this.settings.windSpeed);
+        this.uniformBuffer.updateFloat("amplitude", this.settings.amplitude);
+        this.uniformBuffer.updateFloat("smallWaveLengthCutOff", this.settings.smallWaveLengthCutOff);
+        this.uniformBuffer.updateFloat("oppositeWaveSuppression", this.settings.oppositeWaveSuppression);
+
+        this.uniformBuffer.update();
+    }
+
     /**
-     * Every time a setting is changed on the CPU, the GPU settings must be updated. Call this method to do so.
+     * Every time a setting is changed on the CPU, the GPU settings must be updated.
+     * This also regenerates the initial spectrum texture.
      */
     public updateSettingsGPU() {
-        this.uniformBuffer.update();
+        this.syncSettingsToGPU();
+        this.computeShader.dispatchWhenReady(Math.ceil(this.textureSize / 8), Math.ceil(this.textureSize / 8), 1);
     }
 }

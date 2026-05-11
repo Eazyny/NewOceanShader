@@ -42,6 +42,16 @@ export class WaterMaterial extends ShaderMaterial {
     readonly reflectionTexture: CubeTexture;
 
     /**
+     * Wave shaping settings.
+     * These are intentionally simple knobs so we can tune the look without touching the FFT pipeline every time.
+     */
+    readonly settings = {
+        waveHeightScale: 0.62,
+        choppinessScale: 0.78,
+        normalStrength: 0.82
+    };
+
+    /**
      * The spectrum describing the simulation at time t=0.
      */
     readonly initialSpectrum: InitialSpectrum;
@@ -93,11 +103,32 @@ export class WaterMaterial extends ShaderMaterial {
         if (Effect.ShadersStore["oceanFragmentShader"] === undefined) {
             Effect.ShadersStore["oceanFragmentShader"] = fragment;
         }
+
         super(name, scene, "ocean", {
             attributes: ["position", "normal", "uv"],
-            uniforms: ["world", "worldView", "worldViewProjection", "view", "projection", "cameraPositionW", "lightDirection", "tileSize"],
-            samplers: ["heightMap", "gradientMap", "displacementMap", "reflectionSampler", "depthSampler", "textureSampler"]
+            uniforms: [
+                "world",
+                "worldView",
+                "worldViewProjection",
+                "view",
+                "projection",
+                "cameraPositionW",
+                "lightDirection",
+                "tileSize",
+                "waveHeightScale",
+                "choppinessScale",
+                "normalStrength"
+            ],
+            samplers: [
+                "heightMap",
+                "gradientMap",
+                "displacementMap",
+                "reflectionSampler",
+                "depthSampler",
+                "textureSampler"
+            ]
         });
+
         this.depthRenderer = scene.enableDepthRenderer(scene.activeCamera, false, true);
         this.setTexture("depthSampler", this.depthRenderer.getDepthMap());
 
@@ -115,7 +146,7 @@ export class WaterMaterial extends ShaderMaterial {
             TropicalSunnyDay_ny,
             TropicalSunnyDay_nz
         ]);
-        //this.reflectionTexture.coordinatesMode = Constants.TEXTURE_CUBE_MAP;
+
         this.setTexture("reflectionSampler", this.reflectionTexture);
 
         if (initialSpectrum.h0.textureFormat != Constants.TEXTUREFORMAT_RGBA) {
@@ -136,6 +167,10 @@ export class WaterMaterial extends ShaderMaterial {
         this.setTexture("heightMap", this.heightMap);
         this.setTexture("gradientMap", this.gradientMap);
         this.setTexture("displacementMap", this.displacementMap);
+
+        this.setFloat("waveHeightScale", this.settings.waveHeightScale);
+        this.setFloat("choppinessScale", this.settings.choppinessScale);
+        this.setFloat("normalStrength", this.settings.normalStrength);
     }
 
     /**
@@ -159,9 +194,13 @@ export class WaterMaterial extends ShaderMaterial {
 
         const activeCamera = this.getScene().activeCamera;
         if (activeCamera === null) throw new Error("No active camera found");
+
         this.setVector3("cameraPositionW", activeCamera.globalPosition);
 
         this.setFloat("tileSize", this.tileSize);
+        this.setFloat("waveHeightScale", this.settings.waveHeightScale);
+        this.setFloat("choppinessScale", this.settings.choppinessScale);
+        this.setFloat("normalStrength", this.settings.normalStrength);
 
         this.setVector3("lightDirection", lightDirection);
     }
