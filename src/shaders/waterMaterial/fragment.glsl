@@ -83,20 +83,20 @@ void main() {
     finalColor = softTonemap(finalColor * 1.15) * 1.25;
 
     /*
-        Blue horizon tint:
-        This keeps the original skybox and original reflection system,
-        but prevents the far water/horizon fade from going washed-out white or grey.
+        Cool sky-blue horizon haze.
+        Lower red, higher green/blue. This avoids the lavender/pink cast and
+        pushes the far water toward the blue part of the sky.
     */
     float cameraDistance = length(vPositionW - cameraPositionW);
 
     float horizonFade = smoothstep(96.0, 158.0, cameraDistance);
-    float delayedHaze = pow(horizonFade, 1.75) * 0.74;
+    float delayedHaze = pow(horizonFade, 1.65) * 0.84;
 
-    float grazingHaze = pow(1.0 - viewDotNormal, 2.8) * 0.10 * horizonFade;
+    float grazingHaze = pow(1.0 - viewDotNormal, 2.8) * 0.12 * horizonFade;
 
     float fogAmount = saturate(delayedHaze + grazingHaze);
 
-    vec3 horizonFogColor = vec3(0.36, 0.68, 0.96);
+    vec3 horizonFogColor = vec3(0.42, 0.70, 0.80);
 
     finalColor = mix(finalColor, horizonFogColor, fogAmount);
 
