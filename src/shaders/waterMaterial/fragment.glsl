@@ -91,6 +91,8 @@ void main() {
     vec3 viewRayW = normalize(vPositionW - cameraPositionW);
     vec3 viewToCameraW = -viewRayW;
 
+    vec3 sunDirectionW = normalize(-lightDirection);
+
     vec3 reflectedRayW = reflect(viewRayW, normal);
     vec3 reflectedColor = textureCube(reflectionSampler, reflectedRayW).rgb;
 
@@ -102,13 +104,17 @@ void main() {
     float fresnel = 0.02 + 0.88 * pow(1.0 - viewDotNormal, 5.0);
     fresnel = saturate(fresnel);
 
-    float ndl = saturate(dot(normal, -lightDirection));
+    float ndl = saturate(dot(normal, sunDirectionW));
     float softLight = 0.34 + ndl * 0.66;
 
-    vec3 halfVector = normalize(-lightDirection + viewToCameraW);
+    vec3 halfVector = normalize(sunDirectionW + viewToCameraW);
 
-    float specularTight = pow(saturate(dot(normal, halfVector)), 220.0) * 0.55;
-    float specularWide = pow(saturate(dot(normal, halfVector)), 55.0) * 0.12;
+    /*
+        Base specular:
+        Still controlled, but cleaner with the explicit sun direction.
+    */
+    float specularTight = pow(saturate(dot(normal, halfVector)), 220.0) * 0.42;
+    float specularWide = pow(saturate(dot(normal, halfVector)), 55.0) * 0.10;
     float specular = specularTight + specularWide;
 
     vec3 litWater = transmittedColor * softLight;
@@ -119,9 +125,38 @@ void main() {
     finalColor += vec3(specular);
 
     /*
+        Cinematic sun-glint path:
+        This adds a more believable broken reflection trail from the directional light.
+        It uses the reflected view ray, wave normals, and procedural breakup so it does
+        not become one big fake white stripe.
+    */
+    float sunReflectionAlignment = saturate(dot(reflectedRayW, sunDirectionW));
+
+    float glintBroad = pow(sunReflectionAlignment, 18.0) * 0.28;
+    float glintMid = pow(sunReflectionAlignment, 46.0) * 0.46;
+    float glintTight = pow(sunReflectionAlignment, 120.0) * 0.72;
+
+    float glintNoiseLarge = fbm(vPositionW.xz * 0.62 + normal.xz * 8.0);
+    float glintNoiseFine = fbm(vPositionW.xz * 2.40 + normal.xz * 18.0 + vec2(12.7, 4.1));
+
+    float glintBreakup = glintNoiseLarge * 0.58 + glintNoiseFine * 0.42;
+    glintBreakup = smoothstep(0.34, 0.88, glintBreakup);
+
+    float glancingBoost = 0.22 + pow(1.0 - viewDotNormal, 1.55) * 0.78;
+    float lightFacingBoost = 0.35 + ndl * 0.65;
+
+    float sunGlint = (glintBroad + glintMid + glintTight) * glintBreakup;
+    sunGlint *= glancingBoost * lightFacingBoost;
+
+    /*
+        Keep the glint bright, but not chrome-white.
+    */
+    vec3 sunGlintColor = vec3(1.0, 0.92, 0.82);
+    finalColor += sunGlintColor * sunGlint;
+
+    /*
         Crest highlight / subtle foam:
-        This is stronger than the last pass, but still not beach foam.
-        It should appear as thin white-blue breakup on sharper wave crests.
+        This is not beach foam. It is thin white-blue breakup on sharper wave crests.
     */
     float waveSteepness = 1.0 - saturate(normal.y);
 
@@ -138,7 +173,7 @@ void main() {
 
     float foamAmount = crestMask * foamBreakup * angleBoost * lightBoost;
 
-    foamAmount *= 0.48;
+    foamAmount *= 0.42;
 
     vec3 foamColor = vec3(0.82, 0.93, 0.98);
     finalColor = mix(finalColor, foamColor, saturate(foamAmount));
