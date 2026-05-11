@@ -11,6 +11,7 @@ import { DirectionalLight } from "@babylonjs/core/Lights/directionalLight";
 import { WaterMaterial } from "./waterMaterial";
 import { PhillipsSpectrum } from "./spectrum/phillipsSpectrum";
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
+import { ShaderMaterial } from "@babylonjs/core/Materials/shaderMaterial";
 import { Texture } from "@babylonjs/core/Materials/Textures/texture";
 import { PostProcess } from "@babylonjs/core/PostProcesses/postProcess";
 import { Effect } from "@babylonjs/core/Materials/effect";
@@ -300,6 +301,65 @@ function getActiveTriangleCount(scene: Scene) {
     return triangles;
 }
 
+function registerTintedSkyboxShader() {
+    Effect.ShadersStore["tintedSkyboxVertexShader"] = `
+        precision highp float;
+
+        attribute vec3 position;
+
+        uniform mat4 worldViewProjection;
+
+        varying vec3 vDirection;
+
+        void main() {
+            vDirection = position;
+            gl_Position = worldViewProjection * vec4(position, 1.0);
+        }
+    `;
+
+    Effect.ShadersStore["tintedSkyboxFragmentShader"] = `
+        precision highp float;
+
+        varying vec3 vDirection;
+
+        uniform samplerCube skyboxSampler;
+
+        float saturate(float value) {
+            return clamp(value, 0.0, 1.0);
+        }
+
+        vec3 saturateVec3(vec3 value) {
+            return clamp(value, vec3(0.0), vec3(1.0));
+        }
+
+        void main() {
+            vec3 dir = normalize(vDirection);
+            vec3 color = textureCube(skyboxSampler, dir).rgb;
+
+            /*
+                This is the key fix:
+                tint the washed-out lower horizon band toward sky blue.
+            */
+            float horizonBand = 1.0 - smoothstep(0.02, 0.22, abs(dir.y));
+            float lowerSkyBias = 1.0 - smoothstep(0.0, 0.30, dir.y);
+
+            float tintAmount = horizonBand * lowerSkyBias * 0.90;
+
+            vec3 skyBlue = vec3(0.34, 0.66, 0.96);
+
+            color = mix(color, skyBlue, tintAmount);
+
+            /*
+                Slight extra blend upward so the band transitions smoothly into the blue sky.
+            */
+            float upperBlend = 1.0 - smoothstep(0.18, 0.42, dir.y);
+            color = mix(color, vec3(0.50, 0.72, 0.92), upperBlend * 0.12);
+
+            gl_FragColor = vec4(saturateVec3(color), 1.0);
+        }
+    `;
+}
+
 const canvas = document.getElementById("renderer") as HTMLCanvasElement;
 canvas.width = window.innerWidth;
 canvas.height = window.innerHeight;
@@ -356,14 +416,26 @@ planet.transform.position.x = -10;
 planet.transform.position.z = -5;
 */
 
+registerTintedSkyboxShader();
+
 const skybox = MeshBuilder.CreateBox("skyBox", { size: camera.maxZ / 2 }, scene);
 skybox.infiniteDistance = true;
 
-const skyboxMaterial = new StandardMaterial("skyBox", scene);
+const skyboxMaterial = new ShaderMaterial(
+    "tintedSkyboxMaterial",
+    scene,
+    "tintedSkybox",
+    {
+        attributes: ["position"],
+        uniforms: ["worldViewProjection"],
+        samplers: ["skyboxSampler"]
+    }
+);
+
 skyboxMaterial.backFaceCulling = false;
-skyboxMaterial.reflectionTexture = waterMaterial.reflectionTexture;
-skyboxMaterial.reflectionTexture.coordinatesMode = Texture.SKYBOX_MODE;
-skyboxMaterial.disableLighting = true;
+skyboxMaterial.disableDepthWrite = true;
+skyboxMaterial.setTexture("skyboxSampler", waterMaterial.reflectionTexture);
+
 skybox.material = skyboxMaterial;
 
 const groundMaterial = new StandardMaterial("groundMaterial", scene);

@@ -56,11 +56,6 @@ void main() {
     vec3 reflectedRayW = reflect(viewRayW, normal);
     vec3 reflectedColor = textureCube(reflectionSampler, reflectedRayW).rgb;
 
-    /*
-        Reflection cleanup:
-        The previous pass was letting the skybox reflection hit pure white too easily.
-        This keeps the reflection bright, but stops it from turning into a blown-out chrome strip.
-    */
     reflectedColor = softTonemap(reflectedColor * 1.35);
     reflectedColor *= vec3(0.86, 0.94, 1.0);
 
@@ -74,34 +69,36 @@ void main() {
 
     vec3 halfVector = normalize(-lightDirection + viewToCameraW);
 
-    /*
-        Specular cleanup:
-        Lowered the hard white highlight and added a wider soft sheen instead.
-    */
     float specularTight = pow(saturate(dot(normal, halfVector)), 220.0) * 0.55;
     float specularWide = pow(saturate(dot(normal, halfVector)), 55.0) * 0.12;
     float specular = specularTight + specularWide;
 
     vec3 litWater = transmittedColor * softLight;
 
-    /*
-        Angle-based reflection:
-        Straight-down view keeps more water color.
-        Glancing angle gets more reflection.
-    */
     vec3 finalColor = mix(litWater, reflectedColor, fresnel);
 
-    /*
-        Subtle blue ocean sheen at grazing angles.
-    */
     finalColor += vec3(0.010, 0.025, 0.040) * pow(1.0 - viewDotNormal, 2.0);
-
     finalColor += vec3(specular);
 
-    /*
-        Final soft clamp. Keeps highlights from nuking the screen.
-    */
     finalColor = softTonemap(finalColor * 1.15) * 1.25;
+
+    /*
+        Blue horizon tint:
+        This keeps the original skybox and original reflection system,
+        but prevents the far water/horizon fade from going washed-out white or grey.
+    */
+    float cameraDistance = length(vPositionW - cameraPositionW);
+
+    float horizonFade = smoothstep(96.0, 158.0, cameraDistance);
+    float delayedHaze = pow(horizonFade, 1.75) * 0.74;
+
+    float grazingHaze = pow(1.0 - viewDotNormal, 2.8) * 0.10 * horizonFade;
+
+    float fogAmount = saturate(delayedHaze + grazingHaze);
+
+    vec3 horizonFogColor = vec3(0.36, 0.68, 0.96);
+
+    finalColor = mix(finalColor, horizonFogColor, fogAmount);
 
     gl_FragColor = vec4(saturateVec3(finalColor), 1.0);
 }
