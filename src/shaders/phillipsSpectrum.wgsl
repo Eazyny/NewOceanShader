@@ -11,9 +11,16 @@ struct Params {
     amplitude: f32,
     smallWaveLengthCutoff: f32,
     oppositeWaveSuppression: f32,
+    secondarySwellStrength: f32,
+    secondarySwellThetaOffset: f32,
+    directionalSpread: f32,
 };
 
 @group(0) @binding(2) var<uniform> params: Params;
+
+fn saturate(value: f32) -> f32 {
+    return clamp(value, 0.0, 1.0);
+}
 
 fn phillipsSpectrum2D(k: vec2<f32>) -> f32 {
     let kLength = length(k);
@@ -23,6 +30,11 @@ fn phillipsSpectrum2D(k: vec2<f32>) -> f32 {
     }
 
     let windDir = normalize(vec2<f32>(cos(params.windTheta), sin(params.windTheta)));
+    let secondaryDir = normalize(vec2<f32>(
+        cos(params.windTheta + params.secondarySwellThetaOffset),
+        sin(params.windTheta + params.secondarySwellThetaOffset)
+    ));
+
     let kDir = normalize(k);
 
     let g: f32 = 9.81;
@@ -33,24 +45,36 @@ fn phillipsSpectrum2D(k: vec2<f32>) -> f32 {
     let kL2: f32 = max(k2 * L * L, 0.000001);
 
     let windDot = dot(kDir, windDir);
+    let secondaryDot = dot(kDir, secondaryDir);
 
     /*
-        Keep the classic Phillips directional bias, but reduce waves moving
-        against the wind. This helps the ocean feel more directional and less
-        like an even ripple sheet.
+        The old spectrum was too narrow and directional, which creates those
+        repeated uniform wave lanes. This broadens the main direction while
+        adding a secondary cross-swell lobe.
     */
-    var windAlignment: f32 = windDot * windDot;
-    windAlignment = pow(windAlignment, 1.35);
+    let alignmentPower = max(0.85, 2.35 - params.directionalSpread * 1.55);
 
-    let oppositeDamping = select(params.oppositeWaveSuppression, 1.0, windDot >= 0.0);
+    let primaryForward = pow(saturate(windDot), alignmentPower);
+    let primaryBackward = pow(saturate(-windDot), alignmentPower) * params.oppositeWaveSuppression;
+
+    let secondarySwell = pow(abs(secondaryDot), 1.45) * params.secondarySwellStrength;
+
+    /*
+        Tiny isotropic floor prevents the surface from being too perfectly
+        organized in one direction.
+    */
+    let ambientChop = 0.035;
+
+    let directionalEnergy = primaryForward + primaryBackward + secondarySwell + ambientChop;
 
     /*
         Higher smallWaveLengthCutoff values remove some tiny high-frequency
-        ripples. This keeps the surface from feeling too noisy/repeated.
+        noise. Keeping this moderate helps preserve detail without turning the
+        ocean into a scratched/rippled sheet.
     */
     let smallWaveDamping: f32 = exp(-k2 * params.smallWaveLengthCutoff * params.smallWaveLengthCutoff);
 
-    return params.amplitude * exp(-1.0 / kL2) * windAlignment * oppositeDamping * smallWaveDamping / k4;
+    return params.amplitude * exp(-1.0 / kL2) * directionalEnergy * smallWaveDamping / k4;
 }
 
 @compute @workgroup_size(8, 8, 1)

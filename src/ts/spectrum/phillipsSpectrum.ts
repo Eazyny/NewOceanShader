@@ -32,9 +32,18 @@ export class PhillipsSpectrum implements InitialSpectrum {
     readonly settings = {
         windTheta: 0.35,
         windSpeed: 38.0,
-        amplitude: 0.9,
-        smallWaveLengthCutOff: 0.05,
-        oppositeWaveSuppression: 0.06
+        amplitude: 0.86,
+        smallWaveLengthCutOff: 0.048,
+        oppositeWaveSuppression: 0.14,
+
+        /*
+            These extra controls reduce the perfectly uniform one-direction ripple look.
+            secondarySwellStrength adds a softer cross-swell lobe.
+            directionalSpread broadens the main wave direction so it feels more natural.
+        */
+        secondarySwellStrength: 0.26,
+        secondarySwellThetaOffset: 1.08,
+        directionalSpread: 0.62
     };
 
     constructor(textureSize: number, tileSize: number, engine: AbstractEngine) {
@@ -67,6 +76,9 @@ export class PhillipsSpectrum implements InitialSpectrum {
         this.uniformBuffer.addUniform("amplitude", 1);
         this.uniformBuffer.addUniform("smallWaveLengthCutOff", 1);
         this.uniformBuffer.addUniform("oppositeWaveSuppression", 1);
+        this.uniformBuffer.addUniform("secondarySwellStrength", 1);
+        this.uniformBuffer.addUniform("secondarySwellThetaOffset", 1);
+        this.uniformBuffer.addUniform("directionalSpread", 1);
 
         this.computeShader.setStorageTexture("H0", this.h0);
         this.computeShader.setTexture("Noise", this.gaussianNoise, false);
@@ -85,6 +97,9 @@ export class PhillipsSpectrum implements InitialSpectrum {
         this.uniformBuffer.updateFloat("amplitude", this.settings.amplitude);
         this.uniformBuffer.updateFloat("smallWaveLengthCutOff", this.settings.smallWaveLengthCutOff);
         this.uniformBuffer.updateFloat("oppositeWaveSuppression", this.settings.oppositeWaveSuppression);
+        this.uniformBuffer.updateFloat("secondarySwellStrength", this.settings.secondarySwellStrength);
+        this.uniformBuffer.updateFloat("secondarySwellThetaOffset", this.settings.secondarySwellThetaOffset);
+        this.uniformBuffer.updateFloat("directionalSpread", this.settings.directionalSpread);
 
         this.uniformBuffer.update();
     }

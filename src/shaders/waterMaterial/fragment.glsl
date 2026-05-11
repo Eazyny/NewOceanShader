@@ -23,6 +23,44 @@ vec3 softTonemap(vec3 color) {
     return color / (color + vec3(1.0));
 }
 
+float hash21(vec2 p) {
+    p = fract(p * vec2(123.34, 456.21));
+    p += dot(p, p + 45.32);
+
+    return fract(p.x * p.y);
+}
+
+float valueNoise(vec2 p) {
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+
+    float a = hash21(i);
+    float b = hash21(i + vec2(1.0, 0.0));
+    float c = hash21(i + vec2(0.0, 1.0));
+    float d = hash21(i + vec2(1.0, 1.0));
+
+    vec2 u = f * f * (3.0 - 2.0 * f);
+
+    return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+}
+
+float fbm(vec2 p) {
+    float value = 0.0;
+    float amplitude = 0.5;
+
+    value += valueNoise(p) * amplitude;
+    p *= 2.03;
+    amplitude *= 0.5;
+
+    value += valueNoise(p) * amplitude;
+    p *= 2.11;
+    amplitude *= 0.5;
+
+    value += valueNoise(p) * amplitude;
+
+    return value;
+}
+
 void main() {
     vec3 normal = normalize(vNormalW);
 
@@ -80,12 +118,35 @@ void main() {
     finalColor += vec3(0.010, 0.025, 0.040) * pow(1.0 - viewDotNormal, 2.0);
     finalColor += vec3(specular);
 
+    /*
+        Crest highlight / subtle foam:
+        This is stronger than the last pass, but still not beach foam.
+        It should appear as thin white-blue breakup on sharper wave crests.
+    */
+    float waveSteepness = 1.0 - saturate(normal.y);
+
+    float crestMask = smoothstep(0.018, 0.105, waveSteepness);
+
+    float largeBreakup = fbm(vPositionW.xz * 0.36);
+    float fineBreakup = fbm(vPositionW.xz * 1.35 + vec2(17.2, 4.8));
+
+    float foamNoise = largeBreakup * 0.60 + fineBreakup * 0.40;
+    float foamBreakup = smoothstep(0.42, 0.78, foamNoise);
+
+    float angleBoost = 0.52 + pow(1.0 - viewDotNormal, 1.55) * 0.48;
+    float lightBoost = 0.58 + ndl * 0.42;
+
+    float foamAmount = crestMask * foamBreakup * angleBoost * lightBoost;
+
+    foamAmount *= 0.48;
+
+    vec3 foamColor = vec3(0.82, 0.93, 0.98);
+    finalColor = mix(finalColor, foamColor, saturate(foamAmount));
+
     finalColor = softTonemap(finalColor * 1.15) * 1.25;
 
     /*
         Cool sky-blue horizon haze.
-        Lower red, higher green/blue. This avoids the lavender/pink cast and
-        pushes the far water toward the blue part of the sky.
     */
     float cameraDistance = length(vPositionW - cameraPositionW);
 
@@ -96,7 +157,7 @@ void main() {
 
     float fogAmount = saturate(delayedHaze + grazingHaze);
 
-    vec3 horizonFogColor = vec3(0.42, 0.70, 0.80);
+    vec3 horizonFogColor = vec3(0.42, 0.70, 0.92);
 
     finalColor = mix(finalColor, horizonFogColor, fogAmount);
 
