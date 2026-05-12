@@ -2,7 +2,9 @@ import "../styles/index.css";
 
 import { Scene } from "@babylonjs/core/scene";
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
+import { Color3 } from "@babylonjs/core/Maths/math.color";
 import { MeshBuilder } from "@babylonjs/core/Meshes/meshBuilder";
+import { TransformNode } from "@babylonjs/core/Meshes/transformNode";
 import "@babylonjs/core/Loading/loadingScreen";
 import { WebGPUEngine } from "@babylonjs/core/Engines";
 import { ArcRotateCamera } from "@babylonjs/core/Cameras/arcRotateCamera";
@@ -10,6 +12,8 @@ import { DirectionalLight } from "@babylonjs/core/Lights/directionalLight";
 
 import { WaterMaterial } from "./waterMaterial";
 import { PhillipsSpectrum } from "./spectrum/phillipsSpectrum";
+import { UnderwaterSystem } from "./underwater/underwaterSystem";
+
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
 import { ShaderMaterial } from "@babylonjs/core/Materials/shaderMaterial";
 import { Texture } from "@babylonjs/core/Materials/Textures/texture";
@@ -24,6 +28,8 @@ import postProcessCode from "../shaders/smallPostProcess.glsl";
 // import { OceanPlanetMaterial } from "./planet/oceanPlanetMaterial";
 // import { Planet } from "./planet/planet";
 
+type CameraMode = "orbit" | "fly" | "boat";
+
 type PerformanceHudElements = {
     root: HTMLDivElement;
     fps: HTMLElement;
@@ -31,6 +37,14 @@ type PerformanceHudElements = {
     draws: HTMLElement;
     tris: HTMLElement;
     dpr: HTMLElement;
+    orbitMode: HTMLElement;
+    flyMode: HTMLElement;
+    boatMode: HTMLElement;
+    moveRow: HTMLElement;
+    verticalRow: HTMLElement;
+    underwaterState: HTMLElement;
+    underwaterDepth: HTMLElement;
+    underwaterAmount: HTMLElement;
 };
 
 function injectPerformanceHudStyles() {
@@ -117,6 +131,20 @@ function injectPerformanceHudStyles() {
         .ocean-performance-hud__inactive {
             color: rgba(210, 235, 245, 0.34);
             font-weight: 800;
+        }
+
+        .ocean-performance-hud__mode {
+            cursor: pointer;
+            border-radius: 8px;
+            margin: -5px -7px;
+            padding: 5px 7px;
+            transition:
+                background 160ms ease,
+                color 160ms ease;
+        }
+
+        .ocean-performance-hud__mode:hover {
+            background: rgba(255, 255, 255, 0.07);
         }
 
         .ocean-performance-hud__button {
@@ -212,19 +240,19 @@ function createPerformanceHud(): PerformanceHudElements {
         <div class="ocean-performance-hud__section">
             <div class="ocean-performance-hud__title">Free Camera</div>
 
-            <div class="ocean-performance-hud__row">
-                <span class="ocean-performance-hud__active">Orbit</span>
-                <span class="ocean-performance-hud__inactive">1</span>
+            <div class="ocean-performance-hud__row ocean-performance-hud__mode" data-camera-mode="orbit">
+                <span data-camera-label="orbit">Orbit</span>
+                <span data-camera-number="orbit">1</span>
             </div>
 
-            <div class="ocean-performance-hud__row">
-                <span class="ocean-performance-hud__inactive">Fly</span>
-                <span class="ocean-performance-hud__inactive">2</span>
+            <div class="ocean-performance-hud__row ocean-performance-hud__mode" data-camera-mode="fly">
+                <span data-camera-label="fly">Fly</span>
+                <span data-camera-number="fly">2</span>
             </div>
 
-            <div class="ocean-performance-hud__row">
-                <span class="ocean-performance-hud__inactive">Boat</span>
-                <span class="ocean-performance-hud__inactive">3</span>
+            <div class="ocean-performance-hud__row ocean-performance-hud__mode" data-camera-mode="boat">
+                <span data-camera-label="boat">Boat</span>
+                <span data-camera-number="boat">3</span>
             </div>
         </div>
 
@@ -242,6 +270,35 @@ function createPerformanceHud(): PerformanceHudElements {
             <div class="ocean-performance-hud__row">
                 <span class="ocean-performance-hud__value">Zoom</span>
                 <span class="ocean-performance-hud__inactive">Scroll</span>
+            </div>
+
+            <div class="ocean-performance-hud__row" data-hud="move-row">
+                <span class="ocean-performance-hud__value">Move</span>
+                <span class="ocean-performance-hud__inactive">WASD</span>
+            </div>
+
+            <div class="ocean-performance-hud__row" data-hud="vertical-row">
+                <span class="ocean-performance-hud__value">Height</span>
+                <span class="ocean-performance-hud__inactive">Q / E</span>
+            </div>
+        </div>
+
+        <div class="ocean-performance-hud__section">
+            <div class="ocean-performance-hud__title">Underwater</div>
+
+            <div class="ocean-performance-hud__row">
+                <span class="ocean-performance-hud__label">State</span>
+                <span class="ocean-performance-hud__value" data-hud="underwater-state">NO</span>
+            </div>
+
+            <div class="ocean-performance-hud__row">
+                <span class="ocean-performance-hud__label">Depth</span>
+                <span class="ocean-performance-hud__value" data-hud="underwater-depth">0.00</span>
+            </div>
+
+            <div class="ocean-performance-hud__row">
+                <span class="ocean-performance-hud__label">Amount</span>
+                <span class="ocean-performance-hud__value" data-hud="underwater-amount">0.00</span>
             </div>
         </div>
 
@@ -263,8 +320,38 @@ function createPerformanceHud(): PerformanceHudElements {
         frame: root.querySelector('[data-hud="frame"]') as HTMLElement,
         draws: root.querySelector('[data-hud="draws"]') as HTMLElement,
         tris: root.querySelector('[data-hud="tris"]') as HTMLElement,
-        dpr: root.querySelector('[data-hud="dpr"]') as HTMLElement
+        dpr: root.querySelector('[data-hud="dpr"]') as HTMLElement,
+        orbitMode: root.querySelector('[data-camera-mode="orbit"]') as HTMLElement,
+        flyMode: root.querySelector('[data-camera-mode="fly"]') as HTMLElement,
+        boatMode: root.querySelector('[data-camera-mode="boat"]') as HTMLElement,
+        moveRow: root.querySelector('[data-hud="move-row"]') as HTMLElement,
+        verticalRow: root.querySelector('[data-hud="vertical-row"]') as HTMLElement,
+        underwaterState: root.querySelector('[data-hud="underwater-state"]') as HTMLElement,
+        underwaterDepth: root.querySelector('[data-hud="underwater-depth"]') as HTMLElement,
+        underwaterAmount: root.querySelector('[data-hud="underwater-amount"]') as HTMLElement
     };
+}
+
+function updateCameraModeHud(hud: PerformanceHudElements, mode: CameraMode) {
+    const modeElements: Record<CameraMode, HTMLElement> = {
+        orbit: hud.orbitMode,
+        fly: hud.flyMode,
+        boat: hud.boatMode
+    };
+
+    (Object.keys(modeElements) as CameraMode[]).forEach((cameraMode) => {
+        const row = modeElements[cameraMode];
+        const label = row.querySelector(`[data-camera-label="${cameraMode}"]`) as HTMLElement;
+        const number = row.querySelector(`[data-camera-number="${cameraMode}"]`) as HTMLElement;
+
+        const isActive = cameraMode === mode;
+
+        label.className = isActive ? "ocean-performance-hud__active" : "ocean-performance-hud__inactive";
+        number.className = isActive ? "ocean-performance-hud__active" : "ocean-performance-hud__inactive";
+    });
+
+    hud.moveRow.style.display = mode === "orbit" ? "none" : "flex";
+    hud.verticalRow.style.display = mode === "fly" ? "flex" : "none";
 }
 
 function formatLargeNumber(value: number) {
@@ -336,10 +423,6 @@ function registerTintedSkyboxShader() {
             vec3 dir = normalize(vDirection);
             vec3 color = textureCube(skyboxSampler, dir).rgb;
 
-            /*
-                This is the key fix:
-                tint the washed-out lower horizon band toward sky blue.
-            */
             float horizonBand = 1.0 - smoothstep(0.02, 0.22, abs(dir.y));
             float lowerSkyBias = 1.0 - smoothstep(0.0, 0.30, dir.y);
 
@@ -349,9 +432,6 @@ function registerTintedSkyboxShader() {
 
             color = mix(color, skyBlue, tintAmount);
 
-            /*
-                Slight extra blend upward so the band transitions smoothly into the blue sky.
-            */
             float upperBlend = 1.0 - smoothstep(0.18, 0.42, dir.y);
             color = mix(color, vec3(0.50, 0.72, 0.92), upperBlend * 0.12);
 
@@ -360,9 +440,124 @@ function registerTintedSkyboxShader() {
     `;
 }
 
+function createDebugBoat(scene: Scene) {
+    const boatRoot = new TransformNode("debugBoatRoot", scene);
+
+    const hullMaterial = new StandardMaterial("debugBoatHullMaterial", scene);
+    hullMaterial.diffuseColor = new Color3(0.055, 0.075, 0.09);
+    hullMaterial.specularColor = new Color3(0.12, 0.16, 0.18);
+
+    const cabinMaterial = new StandardMaterial("debugBoatCabinMaterial", scene);
+    cabinMaterial.diffuseColor = new Color3(0.86, 0.9, 0.92);
+    cabinMaterial.specularColor = new Color3(0.18, 0.2, 0.22);
+
+    const railMaterial = new StandardMaterial("debugBoatRailMaterial", scene);
+    railMaterial.diffuseColor = new Color3(0.68, 0.76, 0.8);
+    railMaterial.specularColor = new Color3(0.22, 0.26, 0.28);
+
+    const hull = MeshBuilder.CreateBox(
+        "debugBoatHull",
+        {
+            width: 1.15,
+            height: 0.28,
+            depth: 2.85
+        },
+        scene
+    );
+
+    hull.parent = boatRoot;
+    hull.position.y = 0.13;
+    hull.material = hullMaterial;
+
+    const bow = MeshBuilder.CreateBox(
+        "debugBoatBow",
+        {
+            width: 0.82,
+            height: 0.22,
+            depth: 0.72
+        },
+        scene
+    );
+
+    bow.parent = boatRoot;
+    bow.position.y = 0.17;
+    bow.position.z = 1.58;
+    bow.rotation.y = Math.PI / 4;
+    bow.material = hullMaterial;
+
+    const cabin = MeshBuilder.CreateBox(
+        "debugBoatCabin",
+        {
+            width: 0.68,
+            height: 0.42,
+            depth: 0.72
+        },
+        scene
+    );
+
+    cabin.parent = boatRoot;
+    cabin.position.y = 0.48;
+    cabin.position.z = -0.28;
+    cabin.material = cabinMaterial;
+
+    const mast = MeshBuilder.CreateCylinder(
+        "debugBoatMast",
+        {
+            height: 1.25,
+            diameter: 0.045,
+            tessellation: 10
+        },
+        scene
+    );
+
+    mast.parent = boatRoot;
+    mast.position.y = 0.95;
+    mast.position.z = 0.42;
+    mast.material = railMaterial;
+
+    const frontRail = MeshBuilder.CreateBox(
+        "debugBoatFrontRail",
+        {
+            width: 0.9,
+            height: 0.045,
+            depth: 0.045
+        },
+        scene
+    );
+
+    frontRail.parent = boatRoot;
+    frontRail.position.y = 0.39;
+    frontRail.position.z = 1.02;
+    frontRail.material = railMaterial;
+
+    const rearRail = MeshBuilder.CreateBox(
+        "debugBoatRearRail",
+        {
+            width: 0.9,
+            height: 0.045,
+            depth: 0.045
+        },
+        scene
+    );
+
+    rearRail.parent = boatRoot;
+    rearRail.position.y = 0.39;
+    rearRail.position.z = -1.02;
+    rearRail.material = railMaterial;
+
+    boatRoot.scaling.setAll(1.0);
+    boatRoot.setEnabled(false);
+
+    return boatRoot;
+}
+
 const canvas = document.getElementById("renderer") as HTMLCanvasElement;
 canvas.width = window.innerWidth;
 canvas.height = window.innerHeight;
+
+canvas.addEventListener("contextmenu", (event) => {
+    event.preventDefault();
+});
 
 if (!(await WebGPUEngine.IsSupportedAsync)) {
     alert(
@@ -396,7 +591,11 @@ camera.lowerRadiusLimit = 5;
 camera.upperRadiusLimit = 90;
 camera.lowerBetaLimit = Math.PI / 3.1;
 camera.upperBetaLimit = Math.PI / 1.92;
-camera.attachControl();
+camera.panningSensibility = 65;
+camera.panningDistanceLimit = 0;
+camera.panningAxis = new Vector3(1, 0, 1);
+(camera as any)._useCtrlForPanning = false;
+camera.attachControl(canvas, true);
 
 const light = new DirectionalLight("light", new Vector3(0.85, -1.0, 2.2).normalize(), scene);
 
@@ -469,12 +668,21 @@ const water = MeshBuilder.CreateGround(
 
 water.material = waterMaterial;
 
+const underwaterSystem = new UnderwaterSystem({
+    scene,
+    camera,
+    getWaterLevel: () => water.position.y,
+    transitionDepth: 0.35
+});
+
+const debugBoat = createDebugBoat(scene);
+
 Effect.ShadersStore["PostProcess1FragmentShader"] = postProcessCode;
 
 const postProcess = new PostProcess(
     "postProcess1",
     "PostProcess1",
-    ["cameraInverseView", "cameraInverseProjection", "cameraPosition"],
+    ["cameraInverseView", "cameraInverseProjection", "cameraPosition", "time", "waterLevel"],
     ["textureSampler", "depthSampler"],
     1,
     camera,
@@ -486,9 +694,143 @@ postProcess.onApplyObservable.add((effect) => {
     effect.setTexture("depthSampler", depthRenderer.getDepthMap());
     effect.setMatrix("cameraInverseView", camera.getViewMatrix().clone().invert());
     effect.setMatrix("cameraInverseProjection", camera.getProjectionMatrix().clone().invert());
+    effect.setVector3("cameraPosition", camera.globalPosition);
+    effect.setFloat("time", performance.now() * 0.001);
+    effect.setFloat("waterLevel", water.position.y);
 });
 
+let activeCameraMode: CameraMode = "orbit";
 let performanceHudTimer = 0;
+let boatTime = 0;
+
+const keyState: Record<string, boolean> = {};
+
+function setCameraMode(mode: CameraMode) {
+    activeCameraMode = mode;
+
+    debugBoat.setEnabled(mode === "boat");
+
+    if (mode === "orbit") {
+        camera.lowerRadiusLimit = 5;
+        camera.upperRadiusLimit = 90;
+        camera.lowerBetaLimit = Math.PI / 3.1;
+        camera.upperBetaLimit = Math.PI / 1.92;
+        camera.radius = 18;
+        camera.beta = Math.PI / 2.08;
+        camera.target.y = 0.35;
+        camera.panningSensibility = 65;
+    }
+
+    if (mode === "fly") {
+        camera.lowerRadiusLimit = 3;
+        camera.upperRadiusLimit = 140;
+        camera.lowerBetaLimit = Math.PI / 3.5;
+        camera.upperBetaLimit = Math.PI / 1.86;
+        camera.radius = 14;
+        camera.beta = Math.PI / 2.04;
+        camera.panningSensibility = 55;
+    }
+
+    if (mode === "boat") {
+        camera.lowerRadiusLimit = 4;
+        camera.upperRadiusLimit = 55;
+        camera.lowerBetaLimit = Math.PI / 2.45;
+        camera.upperBetaLimit = Math.PI / 1.88;
+        camera.radius = 8.5;
+        camera.beta = Math.PI / 1.98;
+        camera.target.y = 0.18;
+        camera.panningSensibility = 75;
+    }
+
+    updateCameraModeHud(performanceHud, mode);
+}
+
+function getFlatForwardDirection() {
+    const forward = camera.target.subtract(camera.position);
+    forward.y = 0;
+
+    if (forward.lengthSquared() < 0.0001) {
+        return new Vector3(0, 0, 1);
+    }
+
+    return forward.normalize();
+}
+
+function getFlatRightDirection(forward: Vector3) {
+    const right = Vector3.Cross(Vector3.Up(), forward);
+    right.y = 0;
+
+    if (right.lengthSquared() < 0.0001) {
+        return new Vector3(1, 0, 0);
+    }
+
+    return right.normalize();
+}
+
+function updateCameraMovement(deltaSeconds: number) {
+    if (activeCameraMode === "orbit") return;
+
+    const forward = getFlatForwardDirection();
+    const right = getFlatRightDirection(forward);
+
+    const movement = Vector3.Zero();
+
+    if (keyState["w"] || keyState["arrowup"]) {
+        movement.addInPlace(forward);
+    }
+
+    if (keyState["s"] || keyState["arrowdown"]) {
+        movement.subtractInPlace(forward);
+    }
+
+    if (keyState["d"] || keyState["arrowright"]) {
+        movement.addInPlace(right);
+    }
+
+    if (keyState["a"] || keyState["arrowleft"]) {
+        movement.subtractInPlace(right);
+    }
+
+    if (movement.lengthSquared() > 0.0001) {
+        const speed = activeCameraMode === "boat" ? 6.5 : 13.0;
+        movement.normalize().scaleInPlace(speed * deltaSeconds);
+        camera.target.addInPlace(movement);
+    }
+
+    if (activeCameraMode === "fly") {
+        const verticalSpeed = 6.0 * deltaSeconds;
+
+        if (keyState["e"]) {
+            camera.target.y += verticalSpeed;
+        }
+
+        if (keyState["q"]) {
+            camera.target.y -= verticalSpeed;
+        }
+
+        camera.target.y = Math.max(-8.0, Math.min(camera.target.y, 24.0));
+    }
+
+    if (activeCameraMode === "boat") {
+        boatTime += deltaSeconds;
+
+        const boatBaseHeight = 0.18;
+        const boatBob = Math.sin(boatTime * 1.7) * 0.035 + Math.sin(boatTime * 3.9) * 0.014;
+
+        camera.target.y = boatBaseHeight + boatBob;
+    }
+}
+
+function updateDebugBoat() {
+    if (activeCameraMode !== "boat") return;
+
+    debugBoat.position.x = camera.target.x;
+    debugBoat.position.y = camera.target.y - 0.08;
+    debugBoat.position.z = camera.target.z;
+
+    const forward = getFlatForwardDirection();
+    debugBoat.rotation.y = Math.atan2(forward.x, forward.z);
+}
 
 function updatePerformanceHud(deltaSeconds: number) {
     performanceHudTimer += deltaSeconds;
@@ -497,21 +839,52 @@ function updatePerformanceHud(deltaSeconds: number) {
 
     performanceHudTimer = 0;
 
+    const underwaterState = underwaterSystem.getState();
+
     performanceHud.fps.textContent = `${Math.round(engine.getFps())}`;
     performanceHud.frame.textContent = `${Math.round(engine.getDeltaTime())} ms`;
     performanceHud.draws.textContent = `${getActiveMeshCount(scene)}`;
     performanceHud.tris.textContent = formatLargeNumber(getActiveTriangleCount(scene));
     performanceHud.dpr.textContent = window.devicePixelRatio.toFixed(2);
+
+    performanceHud.underwaterState.textContent = underwaterState.isUnderwater ? "YES" : "NO";
+    performanceHud.underwaterDepth.textContent = underwaterState.cameraDepthBelowSurface.toFixed(2);
+    performanceHud.underwaterAmount.textContent = underwaterState.underwaterAmount.toFixed(2);
 }
 
 function updateScene() {
     const deltaSeconds = engine.getDeltaTime() / 1000;
+
+    updateCameraMovement(deltaSeconds);
+    updateDebugBoat();
+
+    underwaterSystem.update();
 
     waterMaterial.update(deltaSeconds, light.direction);
     updatePerformanceHud(deltaSeconds);
 
     // oceanPlanetMaterial.update(deltaSeconds, planet.transform, light.direction);
 }
+
+window.addEventListener("keydown", (event) => {
+    const key = event.key.toLowerCase();
+
+    keyState[key] = true;
+
+    if (key === "1") setCameraMode("orbit");
+    if (key === "2") setCameraMode("fly");
+    if (key === "3") setCameraMode("boat");
+});
+
+window.addEventListener("keyup", (event) => {
+    keyState[event.key.toLowerCase()] = false;
+});
+
+performanceHud.orbitMode.addEventListener("click", () => setCameraMode("orbit"));
+performanceHud.flyMode.addEventListener("click", () => setCameraMode("fly"));
+performanceHud.boatMode.addEventListener("click", () => setCameraMode("boat"));
+
+setCameraMode("orbit");
 
 scene.executeWhenReady(() => {
     engine.loadingScreen.hideLoadingUI();
