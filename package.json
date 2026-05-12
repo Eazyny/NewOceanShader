@@ -40,5 +40,8 @@
     "lint:fix": "eslint src/ts --fix",
     "docs": "typedoc --options typedoc.json",
     "serve:docs": "http-server docs -p 8081"
+  },
+  "dependencies": {
+    "@babylonjs/loaders": "7.42.0"
   }
 }

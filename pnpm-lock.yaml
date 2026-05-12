@@ -7,6 +7,10 @@ settings:
 importers:
 
   .:
+    dependencies:
+      '@babylonjs/loaders':
+        specifier: 7.42.0
+        version: 7.42.0(@babylonjs/core@7.42.0)(babylonjs-gltf2interface@7.54.3)
     devDependencies:
       '@babylonjs/core':
         specifier: ^7.42.0
@@ -22,7 +26,7 @@ importers:
         version: 3.0.7(encoding@0.1.13)(mem-fs@2.3.0)(prettier@2.8.8)(webpack-cli@5.1.4)(webpack@5.97.1)
       css-loader:
         specifier: ^6.11.0
-        version: 6.11.0(webpack@5.97.1(webpack-cli@5.1.4))
+        version: 6.11.0(webpack@5.97.1)
       eslint:
         specifier: ^8.57.1
         version: 8.57.1
@@ -31,28 +35,28 @@ importers:
         version: 2.31.0(@typescript-eslint/parser@5.62.0(eslint@8.57.1)(typescript@4.9.5))(eslint@8.57.1)
       html-loader:
         specifier: ^4.2.0
-        version: 4.2.0(webpack@5.97.1(webpack-cli@5.1.4))
+        version: 4.2.0(webpack@5.97.1)
       html-webpack-plugin:
         specifier: ^5.6.3
-        version: 5.6.3(webpack@5.97.1(webpack-cli@5.1.4))
+        version: 5.6.3(webpack@5.97.1)
       http-server:
         specifier: ^14.1.1
         version: 14.1.1
       mini-css-extract-plugin:
         specifier: ^2.9.2
-        version: 2.9.2(webpack@5.97.1(webpack-cli@5.1.4))
+        version: 2.9.2(webpack@5.97.1)
       prettier:
         specifier: ^2.8.8
         version: 2.8.8
       raw-loader:
         specifier: ^4.0.2
-        version: 4.0.2(webpack@5.97.1(webpack-cli@5.1.4))
+        version: 4.0.2(webpack@5.97.1)
       style-loader:
         specifier: ^3.3.4
-        version: 3.3.4(webpack@5.97.1(webpack-cli@5.1.4))
+        version: 3.3.4(webpack@5.97.1)
       ts-loader:
         specifier: ^9.5.1
-        version: 9.5.1(typescript@4.9.5)(webpack@5.97.1(webpack-cli@5.1.4))
+        version: 9.5.1(typescript@4.9.5)(webpack@5.97.1)
       ts-node:
         specifier: ^10.9.2
         version: 10.9.2(@types/node@22.10.5)(typescript@4.9.5)
@@ -99,6 +103,12 @@ packages:
 
   '@babylonjs/core@7.42.0':
     resolution: {integrity: sha512-OFFF8m/N6dUAfDiljqVZ5DIouBt+TksnWOPB2Sye9KJ5M7U+Zc9vlUrOGtpVSH/rGGQmmAvj7uW7o7C8xda4Gg==}
+
+  '@babylonjs/loaders@7.42.0':
+    resolution: {integrity: sha512-1p0dTcL1fxguabxOpDV4iLEOfcncoh6HES90WCffbXvVa+YPGQEBhVqLL3xSAFokTK5ucRjnPdTSfktBMvo10Q==}
+    peerDependencies:
+      '@babylonjs/core': ^7.0.0
+      babylonjs-gltf2interface: ^7.0.0
 
   '@cspotcode/source-map-support@0.8.1':
     resolution: {integrity: sha512-IchNf6dN4tHoMFIn/7OE8LWZ19Y6q/67Bmf6vnGREv8RSbBVb9LPJxEcnwrcwX6ixSvaiGoomAUvu4YSxXrVgw==}
@@ -860,6 +870,9 @@ packages:
   available-typed-arrays@1.0.7:
     resolution: {integrity: sha512-wvUjBtSGN7+7SjNpq/9M2Tg350UZD3q62IFZLbRAR1bSMlCo1ZaeW+BJ+D090e4hIIZLBcTDWe4Mh4jvUDajzQ==}
     engines: {node: '>= 0.4'}
+
+  babylonjs-gltf2interface@7.54.3:
+    resolution: {integrity: sha512-ZAWYFyE+SOczfWT19O4e3YRkCZ5i57SiD2eK2kqc+Tow/t9X1S45xgSFNuHZff++dd5BlVIEQDSnFV+McFLSnQ==}
 
   balanced-match@1.0.2:
     resolution: {integrity: sha512-3oSeUO0TMV67hN1AmbXsK4yaqU7tjiHlbxRDZOpH0KW9+CeX4bRAaX0Anxt0tx2MrpRpWwQaPwIlISEJhYU5Pw==}
@@ -3935,6 +3948,11 @@ snapshots:
 
   '@babylonjs/core@7.42.0': {}
 
+  '@babylonjs/loaders@7.42.0(@babylonjs/core@7.42.0)(babylonjs-gltf2interface@7.54.3)':
+    dependencies:
+      '@babylonjs/core': 7.42.0
+      babylonjs-gltf2interface: 7.54.3
+
   '@cspotcode/source-map-support@0.8.1':
     dependencies:
       '@jridgewell/trace-mapping': 0.3.9
@@ -4656,7 +4674,7 @@ snapshots:
       '@webassemblyjs/ast': 1.14.1
       '@xtuc/long': 4.2.2
 
-  '@webpack-cli/configtest@2.1.1(webpack-cli@5.1.4(@webpack-cli/generators@3.0.7)(webpack-dev-server@4.15.2)(webpack@5.97.1))(webpack@5.97.1(webpack-cli@5.1.4))':
+  '@webpack-cli/configtest@2.1.1(webpack-cli@5.1.4)(webpack@5.97.1)':
     dependencies:
       webpack: 5.97.1(webpack-cli@5.1.4)
       webpack-cli: 5.1.4(@webpack-cli/generators@3.0.7)(webpack-dev-server@4.15.2)(webpack@5.97.1)
@@ -4675,12 +4693,12 @@ snapshots:
       - mem-fs
       - supports-color
 
-  '@webpack-cli/info@2.0.2(webpack-cli@5.1.4(@webpack-cli/generators@3.0.7)(webpack-dev-server@4.15.2)(webpack@5.97.1))(webpack@5.97.1(webpack-cli@5.1.4))':
+  '@webpack-cli/info@2.0.2(webpack-cli@5.1.4)(webpack@5.97.1)':
     dependencies:
       webpack: 5.97.1(webpack-cli@5.1.4)
       webpack-cli: 5.1.4(@webpack-cli/generators@3.0.7)(webpack-dev-server@4.15.2)(webpack@5.97.1)
 
-  '@webpack-cli/serve@2.0.5(webpack-cli@5.1.4(@webpack-cli/generators@3.0.7)(webpack-dev-server@4.15.2)(webpack@5.97.1))(webpack-dev-server@4.15.2(webpack-cli@5.1.4)(webpack@5.97.1))(webpack@5.97.1(webpack-cli@5.1.4))':
+  '@webpack-cli/serve@2.0.5(webpack-cli@5.1.4)(webpack-dev-server@4.15.2)(webpack@5.97.1)':
     dependencies:
       webpack: 5.97.1(webpack-cli@5.1.4)
       webpack-cli: 5.1.4(@webpack-cli/generators@3.0.7)(webpack-dev-server@4.15.2)(webpack@5.97.1)
@@ -4863,6 +4881,8 @@ snapshots:
   available-typed-arrays@1.0.7:
     dependencies:
       possible-typed-array-names: 1.0.0
+
+  babylonjs-gltf2interface@7.54.3: {}
 
   balanced-match@1.0.2: {}
 
@@ -5185,7 +5205,7 @@ snapshots:
       shebang-command: 2.0.0
       which: 2.0.2
 
-  css-loader@6.11.0(webpack@5.97.1(webpack-cli@5.1.4)):
+  css-loader@6.11.0(webpack@5.97.1):
     dependencies:
       icss-utils: 5.1.0(postcss@8.4.49)
       postcss: 8.4.49
@@ -5969,7 +5989,7 @@ snapshots:
 
   html-entities@2.5.2: {}
 
-  html-loader@4.2.0(webpack@5.97.1(webpack-cli@5.1.4)):
+  html-loader@4.2.0(webpack@5.97.1):
     dependencies:
       html-minifier-terser: 7.2.0
       parse5: 7.2.1
@@ -5995,7 +6015,7 @@ snapshots:
       relateurl: 0.2.7
       terser: 5.37.0
 
-  html-webpack-plugin@5.6.3(webpack@5.97.1(webpack-cli@5.1.4)):
+  html-webpack-plugin@5.6.3(webpack@5.97.1):
     dependencies:
       '@types/html-minifier-terser': 6.1.0
       html-minifier-terser: 6.1.0
@@ -6623,7 +6643,7 @@ snapshots:
 
   mimic-fn@2.1.0: {}
 
-  mini-css-extract-plugin@2.9.2(webpack@5.97.1(webpack-cli@5.1.4)):
+  mini-css-extract-plugin@2.9.2(webpack@5.97.1):
     dependencies:
       schema-utils: 4.3.0
       tapable: 2.2.1
@@ -7307,7 +7327,7 @@ snapshots:
       iconv-lite: 0.4.24
       unpipe: 1.0.0
 
-  raw-loader@4.0.2(webpack@5.97.1(webpack-cli@5.1.4)):
+  raw-loader@4.0.2(webpack@5.97.1):
     dependencies:
       loader-utils: 2.0.4
       schema-utils: 3.3.0
@@ -7846,7 +7866,7 @@ snapshots:
 
   strip-json-comments@3.1.1: {}
 
-  style-loader@3.3.4(webpack@5.97.1(webpack-cli@5.1.4)):
+  style-loader@3.3.4(webpack@5.97.1):
     dependencies:
       webpack: 5.97.1(webpack-cli@5.1.4)
 
@@ -7881,7 +7901,7 @@ snapshots:
       mkdirp: 1.0.4
       yallist: 4.0.0
 
-  terser-webpack-plugin@5.3.11(webpack@5.97.1(webpack-cli@5.1.4)):
+  terser-webpack-plugin@5.3.11(webpack@5.97.1):
     dependencies:
       '@jridgewell/trace-mapping': 0.3.25
       jest-worker: 27.5.1
@@ -7919,7 +7939,7 @@ snapshots:
 
   treeverse@1.0.4: {}
 
-  ts-loader@9.5.1(typescript@4.9.5)(webpack@5.97.1(webpack-cli@5.1.4)):
+  ts-loader@9.5.1(typescript@4.9.5)(webpack@5.97.1):
     dependencies:
       chalk: 4.1.2
       enhanced-resolve: 5.18.0
@@ -8192,9 +8212,9 @@ snapshots:
   webpack-cli@5.1.4(@webpack-cli/generators@3.0.7)(webpack-dev-server@4.15.2)(webpack@5.97.1):
     dependencies:
       '@discoveryjs/json-ext': 0.5.7
-      '@webpack-cli/configtest': 2.1.1(webpack-cli@5.1.4(@webpack-cli/generators@3.0.7)(webpack-dev-server@4.15.2)(webpack@5.97.1))(webpack@5.97.1(webpack-cli@5.1.4))
-      '@webpack-cli/info': 2.0.2(webpack-cli@5.1.4(@webpack-cli/generators@3.0.7)(webpack-dev-server@4.15.2)(webpack@5.97.1))(webpack@5.97.1(webpack-cli@5.1.4))
-      '@webpack-cli/serve': 2.0.5(webpack-cli@5.1.4(@webpack-cli/generators@3.0.7)(webpack-dev-server@4.15.2)(webpack@5.97.1))(webpack-dev-server@4.15.2(webpack-cli@5.1.4)(webpack@5.97.1))(webpack@5.97.1(webpack-cli@5.1.4))
+      '@webpack-cli/configtest': 2.1.1(webpack-cli@5.1.4)(webpack@5.97.1)
+      '@webpack-cli/info': 2.0.2(webpack-cli@5.1.4)(webpack@5.97.1)
+      '@webpack-cli/serve': 2.0.5(webpack-cli@5.1.4)(webpack-dev-server@4.15.2)(webpack@5.97.1)
       colorette: 2.0.20
       commander: 10.0.1
       cross-spawn: 7.0.6
@@ -8209,7 +8229,7 @@ snapshots:
       '@webpack-cli/generators': 3.0.7(encoding@0.1.13)(mem-fs@2.3.0)(prettier@2.8.8)(webpack-cli@5.1.4)(webpack@5.97.1)
       webpack-dev-server: 4.15.2(webpack-cli@5.1.4)(webpack@5.97.1)
 
-  webpack-dev-middleware@5.3.4(webpack@5.97.1(webpack-cli@5.1.4)):
+  webpack-dev-middleware@5.3.4(webpack@5.97.1):
     dependencies:
       colorette: 2.0.20
       memfs: 3.5.3
@@ -8248,7 +8268,7 @@ snapshots:
       serve-index: 1.9.1
       sockjs: 0.3.24
       spdy: 4.0.2
-      webpack-dev-middleware: 5.3.4(webpack@5.97.1(webpack-cli@5.1.4))
+      webpack-dev-middleware: 5.3.4(webpack@5.97.1)
       ws: 8.18.0
     optionalDependencies:
       webpack: 5.97.1(webpack-cli@5.1.4)
@@ -8289,7 +8309,7 @@ snapshots:
       neo-async: 2.6.2
       schema-utils: 3.3.0
       tapable: 2.2.1
-      terser-webpack-plugin: 5.3.11(webpack@5.97.1(webpack-cli@5.1.4))
+      terser-webpack-plugin: 5.3.11(webpack@5.97.1)
       watchpack: 2.4.2
       webpack-sources: 3.2.3
     optionalDependencies:
