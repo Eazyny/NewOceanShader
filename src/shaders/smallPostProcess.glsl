@@ -14,30 +14,69 @@ uniform float waterLevel;
 uniform float underwaterAmount;
 uniform float cameraDepthBelowSurface;
 
-float saturate(float v) {
-    return clamp(v, 0.0, 1.0);
+float saturate(float value) {
+    return clamp(value, 0.0, 1.0);
 }
 
-vec3 saturate3(vec3 v) {
-    return clamp(v, vec3(0.0), vec3(1.0));
+vec3 saturateVec3(vec3 value) {
+    return clamp(value, vec3(0.0), vec3(1.0));
 }
 
 vec3 grayscale(vec3 color) {
     return vec3(dot(color, vec3(0.299, 0.587, 0.114)));
 }
 
-vec3 worldFromUV(vec2 pos, mat4 inverseProjection, mat4 inverseView) {
-    vec4 ndc = vec4(pos.xy * 2.0 - 1.0, 1.0, 1.0);
-    vec4 posVS = inverseProjection * ndc;
-    vec4 posWS = inverseView * posVS;
+vec3 reconstructWorldPosition(vec2 uv, float depth) {
+    vec4 clip = vec4(uv * 2.0 - 1.0, depth * 2.0 - 1.0, 1.0);
+    vec4 view = cameraInverseProjection * clip;
+    view /= view.w;
+    vec4 world = cameraInverseView * view;
 
-    return posWS.xyz / posWS.w;
+    return world.xyz / world.w;
+}
+
+float hash21(vec2 p) {
+    p = fract(p * vec2(123.34, 456.21));
+    p += dot(p, p + 45.32);
+
+    return fract(p.x * p.y);
+}
+
+float valueNoise(vec2 p) {
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+
+    float a = hash21(i);
+    float b = hash21(i + vec2(1.0, 0.0));
+    float c = hash21(i + vec2(0.0, 1.0));
+    float d = hash21(i + vec2(1.0, 1.0));
+
+    vec2 u = f * f * (3.0 - 2.0 * f);
+
+    return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+}
+
+float fbm(vec2 p) {
+    float v = 0.0;
+    float a = 0.5;
+
+    v += valueNoise(p) * a;
+    p *= 2.02;
+    a *= 0.5;
+
+    v += valueNoise(p) * a;
+    p *= 2.09;
+    a *= 0.5;
+
+    v += valueNoise(p) * a;
+
+    return v;
 }
 
 float getAboveWaterFogFactor(float depth, vec3 rayDir) {
     const float LOG2 = 1.442695;
-    const float density = 400.0;
-    const float start = 0.3;
+    const float density = 380.0;
+    const float start = 0.35;
     const float end = 1.0;
 
     float fogFactor = exp2(-density * density * depth * depth * LOG2);
@@ -47,59 +86,37 @@ float getAboveWaterFogFactor(float depth, vec3 rayDir) {
     return fogFactor;
 }
 
-float getDistanceProxy(float rawDepth) {
-    float farAmount = 1.0 - saturate(rawDepth);
-    farAmount = pow(farAmount, 0.78);
+vec3 getUnderwaterBackground(vec2 uv, float depthFactor) {
+    vec3 shallow = vec3(0.018, 0.145, 0.145);
+    vec3 mid = vec3(0.006, 0.085, 0.105);
+    vec3 deep = vec3(0.0015, 0.025, 0.042);
 
-    return mix(1.0, 135.0, farAmount);
-}
+    vec3 color = mix(shallow, mid, depthFactor);
+    color = mix(color, deep, depthFactor * depthFactor);
 
-vec2 underwaterDistortion(vec2 uv, float t, float depthBelowSurface) {
-    float strength = 0.00022 + saturate(depthBelowSurface * 0.035) * 0.00062;
+    float verticalGlow = smoothstep(0.10, 0.95, uv.y);
+    color += vec3(0.020, 0.070, 0.075) * verticalGlow * (1.0 - depthFactor * 0.65);
 
-    float wave1 = sin(uv.y * 18.0 + t * 0.42);
-    float wave2 = cos(uv.x * 16.0 - t * 0.35);
-    float wave3 = sin((uv.x + uv.y) * 11.0 + t * 0.48);
-
-    vec2 offset = vec2(
-        wave1 * 0.55 + wave3 * 0.20,
-        wave2 * 0.55 - wave3 * 0.14
-    ) * strength;
-
-    return clamp(uv + offset, vec2(0.001), vec2(0.999));
-}
-
-float causticPattern(vec2 p, float t) {
-    float a = sin(p.x * 8.0 + t * 0.78);
-    float b = sin(p.y * 10.0 - t * 0.68);
-    float c = sin((p.x + p.y) * 6.5 + t * 0.52);
-    float d = sin((p.x - p.y) * 7.0 - t * 0.58);
-
-    float pattern = (a + b + c + d) * 0.25;
-    pattern = pattern * 0.5 + 0.5;
-
-    return smoothstep(0.70, 0.94, pattern);
+    return color;
 }
 
 void main() {
     float rawDepth = texture2D(depthSampler, vUV).r;
     vec3 baseColor = texture2D(textureSampler, vUV).rgb;
 
-    /*
-        Above water: preserve the original safe post-process look.
-    */
-    if (underwaterAmount < 0.001) {
-        vec3 rayDir = normalize(worldFromUV(vUV, cameraInverseProjection, cameraInverseView) - cameraPosition);
+    vec3 worldPos = reconstructWorldPosition(vUV, rawDepth);
+    vec3 rayDir = normalize(worldPos - cameraPosition);
 
+    if (underwaterAmount < 0.001) {
         float fogFactor = getAboveWaterFogFactor(rawDepth, rayDir);
-        vec3 fogColor = vec3(0.8);
+        vec3 fogColor = vec3(0.80);
 
         vec3 color = baseColor;
 
         const float exposure = 1.0;
         const float contrast = 1.0;
         const float brightness = 0.0;
-        const float saturation = 1.3;
+        const float saturation = 1.15;
 
         color *= exposure;
         color = clamp(color, 0.0, 1.0);
@@ -116,125 +133,69 @@ void main() {
         return;
     }
 
-    /*
-        Underwater controlled volume.
-        This pass handles color grading, absorption, and depth falloff.
-    */
-    vec2 distortedUV = underwaterDistortion(vUV, time, cameraDepthBelowSurface);
-    vec3 sceneColor = texture2D(textureSampler, distortedUV).rgb;
-
-    float hasGeometry = step(0.00001, rawDepth);
-
-    float luminance = dot(sceneColor, vec3(0.299, 0.587, 0.114));
-    float redBrown = saturate(sceneColor.r - sceneColor.b);
-    float brightLeak = smoothstep(0.58, 0.90, luminance);
+    float cameraDepthFactor = smoothstep(0.0, 20.0, cameraDepthBelowSurface);
 
     /*
-        Bright leaks from sky/surface become water volume.
-        We don't want white/gray atmosphere underwater.
+        Critical fix:
+        Empty far-background pixels should become underwater volume,
+        not black infinite-depth absorption.
     */
-    float leakMask = brightLeak * (1.0 - hasGeometry * 0.35);
+    if (rawDepth >= 0.999) {
+        vec3 background = getUnderwaterBackground(vUV, cameraDepthFactor);
+        gl_FragColor = vec4(background, 1.0);
+        return;
+    }
 
-    float distanceProxy = getDistanceProxy(rawDepth);
-    distanceProxy = mix(150.0, distanceProxy, hasGeometry);
+    float viewDistance = length(worldPos - cameraPosition);
+    float sceneDepthBelowSurface = max(waterLevel - worldPos.y, 0.0);
 
-    float cameraDepthFactor = smoothstep(0.0, 14.0, cameraDepthBelowSurface);
-    float waterDistance = distanceProxy * (1.0 + cameraDepthFactor * 0.40);
+    vec3 absorption = vec3(0.050, 0.026, 0.014);
+    vec3 transmittance = exp(-absorption * viewDistance * 0.30);
 
-    float farFactor = smoothstep(5.0, 95.0, waterDistance);
+    vec3 color = baseColor * transmittance;
+
+    vec3 shallowScatter = vec3(0.018, 0.130, 0.132);
+    vec3 deepScatter = vec3(0.002, 0.050, 0.070);
+    vec3 scatterColor = mix(shallowScatter, deepScatter, cameraDepthFactor);
+
+    float scatterAmount = 1.0 - exp(-viewDistance * 0.038);
+    color = mix(color, scatterColor, scatterAmount * 0.25);
 
     /*
-        New underwater palette:
-        More teal-green, less gray.
+        World-space underwater caustics.
+        This is not final ray-caustics, but it is depth-aware and projected onto real geometry.
     */
-    vec3 shallowWaterColor = vec3(0.018, 0.245, 0.220);
-    vec3 midWaterColor = vec3(0.006, 0.130, 0.125);
-    vec3 deepWaterColor = vec3(0.001, 0.038, 0.050);
+    if (sceneDepthBelowSurface > 0.01) {
+        vec2 cuv1 = worldPos.xz * 0.72 + vec2(time * 0.22, time * 0.15);
+        vec2 cuv2 = worldPos.xz * 1.32 + vec2(-time * 0.18, time * 0.26);
+        vec2 cuv3 = worldPos.xz * 2.10 + vec2(time * 0.09, -time * 0.14);
 
-    vec3 bodyColor = mix(shallowWaterColor, midWaterColor, farFactor);
-    bodyColor = mix(bodyColor, deepWaterColor, cameraDepthFactor * 0.68 + farFactor * 0.24);
+        float c1 = fbm(cuv1);
+        float c2 = fbm(cuv2);
+        float c3 = fbm(cuv3);
 
-    /*
-        Absorption:
-        Stronger red/brown removal so the sand feels submerged.
-    */
-    vec3 absorption = vec3(0.130, 0.060, 0.030);
-    vec3 transmittance = exp(-absorption * waterDistance * 0.46);
+        float causticPattern = c1 * 0.50 + c2 * 0.32 + c3 * 0.18;
+        causticPattern = smoothstep(0.56, 0.84, causticPattern);
 
-    vec3 absorbedScene = sceneColor * transmittance;
+        float causticFadeByDepth = exp(-sceneDepthBelowSurface * 0.40);
+        float causticFadeByDistance = exp(-viewDistance * 0.016);
 
-    /*
-        Remove dry-land brown especially with distance.
-    */
-    absorbedScene = mix(absorbedScene, absorbedScene * vec3(0.62, 0.92, 1.05), redBrown * 0.65);
+        float caustics = causticPattern * causticFadeByDepth * causticFadeByDistance;
 
-    /*
-        Empty/bright background becomes water body color.
-    */
-    absorbedScene = mix(bodyColor, absorbedScene, hasGeometry);
-    absorbedScene = mix(absorbedScene, bodyColor, leakMask * 0.85);
+        vec3 causticColor = vec3(0.22, 0.34, 0.24);
+        color += causticColor * caustics * 0.62;
+    }
 
-    /*
-        Depth fog:
-        Far objects dissolve into water color.
-    */
-    float scatterAmount = 1.0 - exp(-waterDistance * 0.056);
-    scatterAmount = saturate(scatterAmount);
+    float luminance = dot(baseColor, vec3(0.299, 0.587, 0.114));
+    float highlightPreserve = smoothstep(0.45, 0.92, luminance);
+    color = mix(color, baseColor, highlightPreserve * 0.18);
 
-    vec3 underwaterColor = mix(absorbedScene, bodyColor, scatterAmount);
+    float desat = 0.03 + cameraDepthFactor * 0.04;
+    color = mix(color, grayscale(color), desat);
 
-    /*
-        Keep only very near seabed detail.
-    */
-    float nearGeometry = hasGeometry * (1.0 - smoothstep(4.0, 30.0, waterDistance));
-    underwaterColor += sceneColor * nearGeometry * 0.025;
-
-    /*
-        Distance/depth darkening.
-    */
-    float distanceDarkening = smoothstep(14.0, 110.0, waterDistance);
-    float descentDarkening = smoothstep(2.5, 20.0, cameraDepthBelowSurface);
-
-    underwaterColor *= 1.0 - distanceDarkening * 0.30;
-    underwaterColor *= 1.0 - descentDarkening * 0.16;
-
-    /*
-        Near-surface teal light.
-        This replaces the gray haze with actual water color.
-    */
-    float nearSurface = 1.0 - smoothstep(0.0, 7.0, cameraDepthBelowSurface);
-    vec3 surfaceVolumeColor = vec3(0.035, 0.300, 0.260);
-
-    underwaterColor = mix(underwaterColor, surfaceVolumeColor, nearSurface * leakMask * 0.65);
-    underwaterColor += surfaceVolumeColor * nearSurface * 0.10;
-
-    /*
-        Subtle caustics on close geometry.
-    */
-    float causticMask = nearGeometry * nearSurface;
-
-    vec2 causticUV = distortedUV * vec2(10.0, 7.0);
-    causticUV += vec2(
-        sin(time * 0.24) * 0.18,
-        cos(time * 0.19) * 0.14
-    );
-
-    float caustics = causticPattern(causticUV, time);
-    underwaterColor += vec3(0.065, 0.120, 0.080) * caustics * causticMask * 0.16;
-
-    /*
-        Keep saturation alive. Earlier versions died because of too much gray mix.
-    */
-    underwaterColor = mix(grayscale(underwaterColor), underwaterColor, 0.985);
-
-    /*
-        Soft vignette for depth.
-    */
     vec2 centered = vUV * 2.0 - 1.0;
-    float vignette = 1.0 - dot(centered, centered) * 0.055;
-    underwaterColor *= clamp(vignette, 0.92, 1.0);
+    float vignette = 1.0 - dot(centered, centered) * 0.025;
+    color *= clamp(vignette, 0.95, 1.0);
 
-    vec3 finalColor = mix(baseColor, underwaterColor, underwaterAmount);
-
-    gl_FragColor = vec4(saturate3(finalColor), 1.0);
+    gl_FragColor = vec4(saturateVec3(color), 1.0);
 }

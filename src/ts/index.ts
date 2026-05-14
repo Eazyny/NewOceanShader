@@ -5,16 +5,19 @@ import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { Color3 } from "@babylonjs/core/Maths/math.color";
 import { MeshBuilder } from "@babylonjs/core/Meshes/meshBuilder";
 import { TransformNode } from "@babylonjs/core/Meshes/transformNode";
+import { AbstractMesh } from "@babylonjs/core/Meshes/abstractMesh";
 import "@babylonjs/core/Loading/loadingScreen";
 import { WebGPUEngine } from "@babylonjs/core/Engines";
 import { ArcRotateCamera } from "@babylonjs/core/Cameras/arcRotateCamera";
 import { DirectionalLight } from "@babylonjs/core/Lights/directionalLight";
+import { HemisphericLight } from "@babylonjs/core/Lights/hemisphericLight";
 
 import { WaterMaterial } from "./waterMaterial";
 import { PhillipsSpectrum } from "./spectrum/phillipsSpectrum";
 import { UnderwaterSystem } from "./underwater/underwaterSystem";
 
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
+import { PBRMaterial } from "@babylonjs/core/Materials/PBR/pbrMaterial";
 import { ShaderMaterial } from "@babylonjs/core/Materials/shaderMaterial";
 import { Texture } from "@babylonjs/core/Materials/Textures/texture";
 import { PostProcess } from "@babylonjs/core/PostProcesses/postProcess";
@@ -22,11 +25,7 @@ import { Effect } from "@babylonjs/core/Materials/effect";
 
 import "@babylonjs/core/Rendering/depthRendererSceneComponent";
 
-import sandTexture from "../assets/sand.jpg";
-
 import postProcessCode from "../shaders/smallPostProcess.glsl";
-// import { OceanPlanetMaterial } from "./planet/oceanPlanetMaterial";
-// import { Planet } from "./planet/planet";
 
 type CameraMode = "orbit" | "fly" | "boat";
 
@@ -45,6 +44,11 @@ type PerformanceHudElements = {
     underwaterState: HTMLElement;
     underwaterDepth: HTMLElement;
     underwaterAmount: HTMLElement;
+};
+
+type ActiveMeshCollection = {
+    length: number;
+    data: AbstractMesh[];
 };
 
 function injectPerformanceHudStyles() {
@@ -366,19 +370,25 @@ function formatLargeNumber(value: number) {
     return `${Math.round(value)}`;
 }
 
+function getActiveMeshCollection(scene: Scene): ActiveMeshCollection {
+    return scene.getActiveMeshes() as unknown as ActiveMeshCollection;
+}
+
+function getActiveMeshAt(activeMeshes: ActiveMeshCollection, index: number): AbstractMesh | undefined {
+    return activeMeshes.data[index];
+}
+
 function getActiveMeshCount(scene: Scene) {
-    const activeMeshes = scene.getActiveMeshes() as any;
-    return typeof activeMeshes.length === "number" ? activeMeshes.length : 0;
+    return getActiveMeshCollection(scene).length;
 }
 
 function getActiveTriangleCount(scene: Scene) {
-    const activeMeshes = scene.getActiveMeshes() as any;
-    const length = typeof activeMeshes.length === "number" ? activeMeshes.length : 0;
+    const activeMeshes = getActiveMeshCollection(scene);
 
     let triangles = 0;
 
-    for (let i = 0; i < length; i++) {
-        const mesh = activeMeshes.data?.[i] ?? activeMeshes[i];
+    for (let i = 0; i < activeMeshes.length; i++) {
+        const mesh = getActiveMeshAt(activeMeshes, i);
 
         if (!mesh || typeof mesh.getTotalIndices !== "function") continue;
 
@@ -410,6 +420,9 @@ function registerTintedSkyboxShader() {
         varying vec3 vDirection;
 
         uniform samplerCube skyboxSampler;
+        uniform vec3 sunDirection;
+        uniform float underwaterAmount;
+        uniform float cameraDepthBelowSurface;
 
         float saturate(float value) {
             return clamp(value, 0.0, 1.0);
@@ -419,21 +432,59 @@ function registerTintedSkyboxShader() {
             return clamp(value, vec3(0.0), vec3(1.0));
         }
 
+        vec3 softTonemap(vec3 color) {
+            return color / (color + vec3(1.0));
+        }
+
         void main() {
             vec3 dir = normalize(vDirection);
+            vec3 sunDir = normalize(sunDirection);
+
             vec3 color = textureCube(skyboxSampler, dir).rgb;
 
             float horizonBand = 1.0 - smoothstep(0.02, 0.22, abs(dir.y));
             float lowerSkyBias = 1.0 - smoothstep(0.0, 0.30, dir.y);
-
             float tintAmount = horizonBand * lowerSkyBias * 0.90;
 
             vec3 skyBlue = vec3(0.34, 0.66, 0.96);
-
             color = mix(color, skyBlue, tintAmount);
 
             float upperBlend = 1.0 - smoothstep(0.18, 0.42, dir.y);
             color = mix(color, vec3(0.50, 0.72, 0.92), upperBlend * 0.12);
+
+            float sunAlignment = saturate(dot(dir, sunDir));
+
+            float sunCore = smoothstep(0.99978, 0.99996, sunAlignment);
+            float sunInnerGlow = pow(sunAlignment, 720.0) * 0.55;
+            float sunHalo = pow(sunAlignment, 85.0) * 0.36;
+            float wideAtmosphereGlow = pow(sunAlignment, 18.0) * 0.22;
+
+            vec3 sunCoreColor = vec3(1.0, 0.87, 0.58);
+            vec3 sunHaloColor = vec3(1.0, 0.67, 0.42);
+            vec3 skyGlowColor = vec3(0.72, 0.88, 1.0);
+
+            color += sunCoreColor * sunCore * 3.5;
+            color += sunCoreColor * sunInnerGlow;
+            color += sunHaloColor * sunHalo;
+            color += skyGlowColor * wideAtmosphereGlow;
+
+            float depthBlend = smoothstep(0.0, 22.0, cameraDepthBelowSurface);
+
+            vec3 shallowWaterBackground = vec3(0.020, 0.160, 0.160);
+            vec3 midWaterBackground = vec3(0.006, 0.085, 0.105);
+            vec3 deepWaterBackground = vec3(0.0015, 0.025, 0.042);
+
+            vec3 waterBackground = mix(shallowWaterBackground, midWaterBackground, depthBlend);
+            waterBackground = mix(waterBackground, deepWaterBackground, depthBlend * depthBlend);
+
+            float underwaterBlend = underwaterAmount * (0.78 + depthBlend * 0.18);
+
+            color = mix(color, waterBackground, underwaterBlend);
+
+            float underwaterSun = pow(sunAlignment, 24.0) * underwaterAmount * (1.0 - depthBlend * 0.55);
+            color += vec3(0.55, 0.90, 1.0) * underwaterSun * 0.22;
+
+            color = softTonemap(color * 1.08) * 1.22;
 
             gl_FragColor = vec4(saturateVec3(color), 1.0);
         }
@@ -551,6 +602,60 @@ function createDebugBoat(scene: Scene) {
     return boatRoot;
 }
 
+function configureTiledTexture(texture: Texture, scale: number) {
+    texture.wrapU = Texture.WRAP_ADDRESSMODE;
+    texture.wrapV = Texture.WRAP_ADDRESSMODE;
+    texture.uScale = scale;
+    texture.vScale = scale;
+}
+
+function createSeabedMaterial(scene: Scene) {
+    const material = new PBRMaterial("seabedPBRMaterial", scene);
+
+    const colorTexture = new Texture(
+        "/textures/underwater/seabed/sand_01/sand_01_color.png",
+        scene
+    );
+
+    const aoTexture = new Texture(
+        "/textures/underwater/seabed/sand_01/sand_01_ao.png",
+        scene
+    );
+
+    const normalTexture = new Texture(
+        "/textures/underwater/seabed/sand_01/sand_01_normal_gl.png",
+        scene
+    );
+
+    const roughnessTexture = new Texture(
+        "/textures/underwater/seabed/sand_01/sand_01_roughness.png",
+        scene
+    );
+
+    configureTiledTexture(colorTexture, 70);
+    configureTiledTexture(aoTexture, 70);
+    configureTiledTexture(normalTexture, 70);
+    configureTiledTexture(roughnessTexture, 70);
+
+    aoTexture.gammaSpace = false;
+    normalTexture.gammaSpace = false;
+    roughnessTexture.gammaSpace = false;
+
+    material.albedoTexture = colorTexture;
+    material.ambientTexture = aoTexture;
+    material.bumpTexture = normalTexture;
+    material.metallicTexture = roughnessTexture;
+
+    material.albedoColor = new Color3(0.72, 0.68, 0.56);
+    material.metallic = 0;
+    material.roughness = 0.94;
+    material.environmentIntensity = 0.22;
+    material.directIntensity = 0.72;
+    material.specularIntensity = 0.12;
+
+    return material;
+}
+
 const canvas = document.getElementById("renderer") as HTMLCanvasElement;
 canvas.width = window.innerWidth;
 canvas.height = window.innerHeight;
@@ -573,6 +678,8 @@ await engine.initAsync();
 
 const scene = new Scene(engine);
 
+scene.ambientColor = new Color3(0.18, 0.22, 0.22);
+
 const camera = new ArcRotateCamera(
     "camera",
     Math.PI / 3,
@@ -594,26 +701,29 @@ camera.upperBetaLimit = Math.PI / 1.92;
 camera.panningSensibility = 65;
 camera.panningDistanceLimit = 0;
 camera.panningAxis = new Vector3(1, 0, 1);
-(camera as any)._useCtrlForPanning = false;
 camera.attachControl(canvas, true);
 
 const light = new DirectionalLight("light", new Vector3(0.85, -1.0, 2.2).normalize(), scene);
+light.intensity = 2.25;
+light.diffuse = new Color3(1.0, 0.96, 0.86);
+light.specular = new Color3(1.0, 0.92, 0.76);
+
+const surfaceAmbientLight = new HemisphericLight(
+    "surfaceAmbientLight",
+    new Vector3(0.0, 1.0, 0.0),
+    scene
+);
+
+surfaceAmbientLight.intensity = 0.24;
+surfaceAmbientLight.diffuse = new Color3(0.55, 0.70, 0.78);
+surfaceAmbientLight.groundColor = new Color3(0.10, 0.13, 0.11);
+surfaceAmbientLight.specular = new Color3(0.04, 0.05, 0.05);
 
 const textureSize = 256;
 const tileSize = 10;
 
-const depthRenderer = scene.enableDepthRenderer(camera, false, true);
 const initialSpectrum = new PhillipsSpectrum(textureSize, tileSize, engine);
 const waterMaterial = new WaterMaterial("waterMaterial", initialSpectrum, scene, engine);
-
-/*
-const oceanPlanetMaterial = new OceanPlanetMaterial("oceanPlanet", initialSpectrum, scene);
-const planetRadius = 2;
-const planet = new Planet(planetRadius, oceanPlanetMaterial, scene);
-planet.transform.position.y = planetRadius + 1;
-planet.transform.position.x = -10;
-planet.transform.position.z = -5;
-*/
 
 registerTintedSkyboxShader();
 
@@ -626,7 +736,12 @@ const skyboxMaterial = new ShaderMaterial(
     "tintedSkybox",
     {
         attributes: ["position"],
-        uniforms: ["worldViewProjection"],
+        uniforms: [
+            "worldViewProjection",
+            "sunDirection",
+            "underwaterAmount",
+            "cameraDepthBelowSurface"
+        ],
         samplers: ["skyboxSampler"]
     }
 );
@@ -634,26 +749,25 @@ const skyboxMaterial = new ShaderMaterial(
 skyboxMaterial.backFaceCulling = false;
 skyboxMaterial.disableDepthWrite = true;
 skyboxMaterial.setTexture("skyboxSampler", waterMaterial.reflectionTexture);
+skyboxMaterial.setVector3("sunDirection", light.direction.scale(-1).normalize());
+skyboxMaterial.setFloat("underwaterAmount", 0);
+skyboxMaterial.setFloat("cameraDepthBelowSurface", 0);
 
 skybox.material = skyboxMaterial;
 
-const groundMaterial = new StandardMaterial("groundMaterial", scene);
-groundMaterial.diffuseTexture = new Texture(sandTexture, scene);
-groundMaterial.specularColor.scaleInPlace(0);
-
-const oceanSize = 260;
+const oceanSize = 900;
 
 const ground = MeshBuilder.CreateGround(
     "ground",
     {
         width: oceanSize * 1.5,
         height: oceanSize * 1.5,
-        subdivisions: 4
+        subdivisions: 24
     },
     scene
 );
 
-ground.material = groundMaterial;
+ground.material = createSeabedMaterial(scene);
 ground.position.y = -10;
 
 const water = MeshBuilder.CreateGround(
@@ -675,6 +789,10 @@ const underwaterSystem = new UnderwaterSystem({
     transitionDepth: 0.35
 });
 
+underwaterSystem.registerWaterMesh(water);
+underwaterSystem.registerWaterMaterial(waterMaterial);
+underwaterSystem.update();
+
 const debugBoat = createDebugBoat(scene);
 
 Effect.ShadersStore["PostProcess1FragmentShader"] = postProcessCode;
@@ -682,7 +800,15 @@ Effect.ShadersStore["PostProcess1FragmentShader"] = postProcessCode;
 const postProcess = new PostProcess(
     "postProcess1",
     "PostProcess1",
-    ["cameraInverseView", "cameraInverseProjection", "cameraPosition", "time", "waterLevel"],
+    [
+        "cameraInverseView",
+        "cameraInverseProjection",
+        "cameraPosition",
+        "time",
+        "waterLevel",
+        "underwaterAmount",
+        "cameraDepthBelowSurface"
+    ],
     ["textureSampler", "depthSampler"],
     1,
     camera,
@@ -691,12 +817,8 @@ const postProcess = new PostProcess(
 );
 
 postProcess.onApplyObservable.add((effect) => {
-    effect.setTexture("depthSampler", depthRenderer.getDepthMap());
-    effect.setMatrix("cameraInverseView", camera.getViewMatrix().clone().invert());
-    effect.setMatrix("cameraInverseProjection", camera.getProjectionMatrix().clone().invert());
-    effect.setVector3("cameraPosition", camera.globalPosition);
+    underwaterSystem.applyToPostProcessEffect(effect);
     effect.setFloat("time", performance.now() * 0.001);
-    effect.setFloat("waterLevel", water.position.y);
 });
 
 let activeCameraMode: CameraMode = "orbit";
@@ -775,21 +897,10 @@ function updateCameraMovement(deltaSeconds: number) {
 
     const movement = Vector3.Zero();
 
-    if (keyState["w"] || keyState["arrowup"]) {
-        movement.addInPlace(forward);
-    }
-
-    if (keyState["s"] || keyState["arrowdown"]) {
-        movement.subtractInPlace(forward);
-    }
-
-    if (keyState["d"] || keyState["arrowright"]) {
-        movement.addInPlace(right);
-    }
-
-    if (keyState["a"] || keyState["arrowleft"]) {
-        movement.subtractInPlace(right);
-    }
+    if (keyState["w"] || keyState["arrowup"]) movement.addInPlace(forward);
+    if (keyState["s"] || keyState["arrowdown"]) movement.subtractInPlace(forward);
+    if (keyState["d"] || keyState["arrowright"]) movement.addInPlace(right);
+    if (keyState["a"] || keyState["arrowleft"]) movement.subtractInPlace(right);
 
     if (movement.lengthSquared() > 0.0001) {
         const speed = activeCameraMode === "boat" ? 6.5 : 13.0;
@@ -800,13 +911,8 @@ function updateCameraMovement(deltaSeconds: number) {
     if (activeCameraMode === "fly") {
         const verticalSpeed = 6.0 * deltaSeconds;
 
-        if (keyState["e"]) {
-            camera.target.y += verticalSpeed;
-        }
-
-        if (keyState["q"]) {
-            camera.target.y -= verticalSpeed;
-        }
+        if (keyState["e"]) camera.target.y += verticalSpeed;
+        if (keyState["q"]) camera.target.y -= verticalSpeed;
 
         camera.target.y = Math.max(-8.0, Math.min(camera.target.y, 24.0));
     }
@@ -860,10 +966,14 @@ function updateScene() {
 
     underwaterSystem.update();
 
+    const underwaterState = underwaterSystem.getState();
+
+    skyboxMaterial.setVector3("sunDirection", light.direction.scale(-1).normalize());
+    skyboxMaterial.setFloat("underwaterAmount", underwaterState.underwaterAmount);
+    skyboxMaterial.setFloat("cameraDepthBelowSurface", underwaterState.cameraDepthBelowSurface);
+
     waterMaterial.update(deltaSeconds, light.direction);
     updatePerformanceHud(deltaSeconds);
-
-    // oceanPlanetMaterial.update(deltaSeconds, planet.transform, light.direction);
 }
 
 window.addEventListener("keydown", (event) => {
@@ -900,4 +1010,7 @@ window.addEventListener("resize", () => {
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
     engine.resize(true);
+
+    underwaterSystem.resize();
+    waterMaterial.resizeSupportTextures(engine.getRenderWidth(), engine.getRenderHeight());
 });

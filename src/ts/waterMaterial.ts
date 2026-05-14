@@ -13,9 +13,11 @@ import { Effect } from "@babylonjs/core/Materials/effect";
 import { Constants } from "@babylonjs/core/Engines/constants";
 import { InitialSpectrum } from "./spectrum/initialSpectrum";
 import { CubeTexture } from "@babylonjs/core/Materials/Textures/cubeTexture";
-import "@babylonjs/core/Rendering/depthRendererSceneComponent";
 import { DepthRenderer } from "@babylonjs/core/Rendering/depthRenderer";
 import { RenderTargetTexture } from "@babylonjs/core/Materials/Textures/renderTargetTexture";
+import { AbstractMesh } from "@babylonjs/core/Meshes/abstractMesh";
+
+import "@babylonjs/core/Rendering/depthRendererSceneComponent";
 
 import TropicalSunnyDay_px from "../assets/skybox/TropicalSunnyDay_px.jpg";
 import TropicalSunnyDay_py from "../assets/skybox/TropicalSunnyDay_py.jpg";
@@ -24,9 +26,35 @@ import TropicalSunnyDay_nx from "../assets/skybox/TropicalSunnyDay_nx.jpg";
 import TropicalSunnyDay_ny from "../assets/skybox/TropicalSunnyDay_ny.jpg";
 import TropicalSunnyDay_nz from "../assets/skybox/TropicalSunnyDay_nz.jpg";
 
+export type WaterMaterialFrameState = {
+    waterLevel?: number;
+    cameraDepthBelowWater?: number;
+    cameraDepthBelowSurface?: number;
+    depthBelowWater?: number;
+    depthBelowSurface?: number;
+    isCameraUnderwater?: boolean;
+    isUnderwater?: boolean;
+    submersion01?: number;
+    underwaterAmount?: number;
+    sceneColorTexture?: BaseTexture;
+    sceneDepthTexture?: BaseTexture;
+};
+
 /**
- * The material that makes all the magic happen. Its vertex shader deforms the water mesh according to the height map
- * computed using IFFT. The fragment shader makes is look like water.
+ * The material that renders the FFT ocean surface.
+ *
+ * This class still owns the FFT simulation textures, because those are part of
+ * the water surface itself. However, Step 1B starts separating render-pipeline
+ * ownership from surface shading:
+ *
+ * - The material keeps a fallback depth/color pass so the old demo path remains
+ *   functional.
+ * - A higher-level UnderwaterSystem can now provide scene color/depth textures
+ *   and camera-water state explicitly.
+ *
+ * Phase 2 will use these inputs to implement physically plausible Fresnel,
+ * refraction, Beer-Lambert absorption, underwater transmission, and total
+ * internal reflection.
  */
 export class WaterMaterial extends ShaderMaterial {
     /**
@@ -85,14 +113,31 @@ export class WaterMaterial extends ShaderMaterial {
      */
     readonly displacementMap: BaseTexture;
 
+    /**
+     * Fallback depth renderer used only when an external underwater/ocean render
+     * pipeline has not supplied a depth texture yet.
+     */
     readonly depthRenderer: DepthRenderer;
 
+    /**
+     * Fallback scene-color target used only when an external underwater/ocean
+     * render pipeline has not supplied a scene color texture yet.
+     */
     readonly screenRenderTarget: RenderTargetTexture;
+
+    private usesExternalSceneColorTexture = false;
+    private usesExternalDepthTexture = false;
+
+    private readonly fallbackRenderList: AbstractMesh[] = [];
+
+    private waterLevel = 0;
+    private cameraDepthBelowWater = 0;
+    private isCameraUnderwater = false;
+    private submersion01 = 0;
 
     /**
      * The elapsed time in seconds since the simulation started.
      * Starting at 0 creates some visual artefacts, so we start at 1 min to avoid them.
-     * @private
      */
     private elapsedSeconds = 60;
 
@@ -112,12 +157,32 @@ export class WaterMaterial extends ShaderMaterial {
                 "worldViewProjection",
                 "view",
                 "projection",
+                "cameraInverseView",
+                "cameraInverseProjection",
                 "cameraPositionW",
                 "lightDirection",
                 "tileSize",
                 "waveHeightScale",
                 "choppinessScale",
-                "normalStrength"
+                "normalStrength",
+
+                /**
+                 * Future-facing water/underwater uniforms.
+                 *
+                 * The current fragment shader does not consume all of these yet,
+                 * but declaring them now lets Step 1B compile cleanly while Phase 2
+                 * can replace the shader with proper physical optics.
+                 */
+                "time",
+                "waterLevel",
+                "cameraDepthBelowWater",
+                "cameraDepthBelowSurface",
+                "depthBelowWater",
+                "depthBelowSurface",
+                "isCameraUnderwater",
+                "isUnderwater",
+                "submersion01",
+                "underwaterAmount"
             ],
             samplers: [
                 "heightMap",
@@ -132,10 +197,16 @@ export class WaterMaterial extends ShaderMaterial {
         this.depthRenderer = scene.enableDepthRenderer(scene.activeCamera, false, true);
         this.setTexture("depthSampler", this.depthRenderer.getDepthMap());
 
-        // create render target texture
-        this.screenRenderTarget = new RenderTargetTexture("screenTexture", { ratio: engine.getRenderWidth() / engine.getRenderHeight() }, scene);
-        scene.customRenderTargets.push(this.screenRenderTarget);
+        this.screenRenderTarget = new RenderTargetTexture(
+            "screenTexture",
+            {
+                width: Math.max(1, engine.getRenderWidth()),
+                height: Math.max(1, engine.getRenderHeight())
+            },
+            scene
+        );
 
+        scene.customRenderTargets.push(this.screenRenderTarget);
         this.setTexture("textureSampler", this.screenRenderTarget);
 
         this.reflectionTexture = new CubeTexture("", scene, null, false, [
@@ -171,6 +242,101 @@ export class WaterMaterial extends ShaderMaterial {
         this.setFloat("waveHeightScale", this.settings.waveHeightScale);
         this.setFloat("choppinessScale", this.settings.choppinessScale);
         this.setFloat("normalStrength", this.settings.normalStrength);
+
+        this.syncWaterStateUniforms();
+    }
+
+    /**
+     * Supplies the scene color texture used by the water shader for refraction.
+     *
+     * This is the preferred path when an UnderwaterSystem/OceanRenderPipeline owns
+     * the support passes. The fallback screenRenderTarget remains available for
+     * compatibility with the original demo architecture.
+     */
+    public setSceneColorTexture(texture: BaseTexture): void {
+        this.usesExternalSceneColorTexture = true;
+        this.setTexture("textureSampler", texture);
+    }
+
+    /**
+     * Supplies the scene depth texture used by the water shader.
+     *
+     * This is the preferred path when an UnderwaterSystem/OceanRenderPipeline owns
+     * the support passes. Phase 2 will use this texture for linearized per-pixel
+     * water thickness.
+     */
+    public setSceneDepthTexture(texture: BaseTexture): void {
+        this.usesExternalDepthTexture = true;
+        this.setTexture("depthSampler", texture);
+    }
+
+    /**
+     * Applies the frame state produced by UnderwaterSystem.
+     *
+     * The current shader only consumes a subset of these values, but keeping the
+     * water state centralized now avoids duplicated camera/depth/waterline logic
+     * when the physical optical shader arrives in Phase 2.
+     */
+    public setUnderwaterFrameState(state: WaterMaterialFrameState): void {
+        if (state.sceneColorTexture !== undefined) {
+            this.setSceneColorTexture(state.sceneColorTexture);
+        }
+
+        if (state.sceneDepthTexture !== undefined) {
+            this.setSceneDepthTexture(state.sceneDepthTexture);
+        }
+
+        if (state.waterLevel !== undefined) {
+            this.waterLevel = state.waterLevel;
+        }
+
+        const resolvedDepth =
+            state.cameraDepthBelowWater ??
+            state.cameraDepthBelowSurface ??
+            state.depthBelowWater ??
+            state.depthBelowSurface;
+
+        if (resolvedDepth !== undefined) {
+            this.cameraDepthBelowWater = resolvedDepth;
+        }
+
+        const resolvedUnderwater =
+            state.isCameraUnderwater ??
+            state.isUnderwater;
+
+        if (resolvedUnderwater !== undefined) {
+            this.isCameraUnderwater = resolvedUnderwater;
+        }
+
+        const resolvedSubmersion =
+            state.submersion01 ??
+            state.underwaterAmount;
+
+        if (resolvedSubmersion !== undefined) {
+            this.submersion01 = resolvedSubmersion;
+        }
+
+        this.syncWaterStateUniforms();
+    }
+
+    /**
+     * Compatibility helper for systems that want to apply both textures and
+     * water-state in one call.
+     */
+    public applyUnderwaterFrameState(state: WaterMaterialFrameState): void {
+        this.setUnderwaterFrameState(state);
+    }
+
+    /**
+     * Clears externally supplied support textures and returns the material to its
+     * original fallback behavior.
+     */
+    public useFallbackSupportTextures(): void {
+        this.usesExternalSceneColorTexture = false;
+        this.usesExternalDepthTexture = false;
+
+        this.setTexture("textureSampler", this.screenRenderTarget);
+        this.setTexture("depthSampler", this.depthRenderer.getDepthMap());
     }
 
     /**
@@ -183,10 +349,7 @@ export class WaterMaterial extends ShaderMaterial {
         this.elapsedSeconds += deltaSeconds;
         this.dynamicSpectrum.generate(this.elapsedSeconds);
 
-        const allNonWaterMeshes = this.getScene().meshes.filter((mesh) => mesh.material !== this);
-
-        this.depthRenderer.getDepthMap().renderList = allNonWaterMeshes;
-        this.screenRenderTarget.renderList = allNonWaterMeshes;
+        this.updateFallbackRenderLists();
 
         this.ifft.applyToTexture(this.dynamicSpectrum.ht, this.heightMap);
         this.ifft.applyToTexture(this.dynamicSpectrum.dht, this.gradientMap);
@@ -202,16 +365,79 @@ export class WaterMaterial extends ShaderMaterial {
         this.setFloat("choppinessScale", this.settings.choppinessScale);
         this.setFloat("normalStrength", this.settings.normalStrength);
 
+        this.setFloat("time", this.elapsedSeconds);
+        this.syncWaterStateUniforms();
+
+        this.setMatrix("view", activeCamera.getViewMatrix());
+        this.setMatrix("projection", activeCamera.getProjectionMatrix());
+        this.setMatrix("cameraInverseView", activeCamera.getViewMatrix().clone().invert());
+        this.setMatrix("cameraInverseProjection", activeCamera.getProjectionMatrix().clone().invert());
+
         this.setVector3("lightDirection", lightDirection);
     }
 
+    public resizeSupportTextures(width: number, height: number): void {
+        this.screenRenderTarget.resize({
+            width: Math.max(1, Math.floor(width)),
+            height: Math.max(1, Math.floor(height))
+        });
+    }
+
     public dispose(forceDisposeEffect?: boolean, forceDisposeTextures?: boolean, notBoundToMesh?: boolean) {
+        const scene = this.getScene();
+        const customTargetIndex = scene.customRenderTargets.indexOf(this.screenRenderTarget);
+
+        if (customTargetIndex !== -1) {
+            scene.customRenderTargets.splice(customTargetIndex, 1);
+        }
+
         this.dynamicSpectrum.dispose();
         this.ifft.dispose();
         this.heightMap.dispose();
         this.gradientMap.dispose();
         this.displacementMap.dispose();
 
+        if (forceDisposeTextures) {
+            this.reflectionTexture.dispose();
+            this.screenRenderTarget.dispose();
+        }
+
         super.dispose(forceDisposeEffect, forceDisposeTextures, notBoundToMesh);
+    }
+
+    private syncWaterStateUniforms(): void {
+        this.setFloat("waterLevel", this.waterLevel);
+
+        this.setFloat("cameraDepthBelowWater", this.cameraDepthBelowWater);
+        this.setFloat("cameraDepthBelowSurface", this.cameraDepthBelowWater);
+        this.setFloat("depthBelowWater", this.cameraDepthBelowWater);
+        this.setFloat("depthBelowSurface", this.cameraDepthBelowWater);
+
+        this.setFloat("isCameraUnderwater", this.isCameraUnderwater ? 1 : 0);
+        this.setFloat("isUnderwater", this.isCameraUnderwater ? 1 : 0);
+
+        this.setFloat("submersion01", this.submersion01);
+        this.setFloat("underwaterAmount", this.submersion01);
+    }
+
+    private updateFallbackRenderLists(): void {
+        if (this.usesExternalSceneColorTexture && this.usesExternalDepthTexture) return;
+
+        this.fallbackRenderList.length = 0;
+
+        for (const mesh of this.getScene().meshes) {
+            if (mesh.material === this) continue;
+            if (mesh.isDisposed()) continue;
+
+            this.fallbackRenderList.push(mesh);
+        }
+
+        if (!this.usesExternalDepthTexture) {
+            this.depthRenderer.getDepthMap().renderList = this.fallbackRenderList;
+        }
+
+        if (!this.usesExternalSceneColorTexture) {
+            this.screenRenderTarget.renderList = this.fallbackRenderList;
+        }
     }
 }
