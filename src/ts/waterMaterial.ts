@@ -43,18 +43,10 @@ export type WaterMaterialFrameState = {
 /**
  * The material that renders the FFT ocean surface.
  *
- * This class still owns the FFT simulation textures, because those are part of
- * the water surface itself. However, Step 1B starts separating render-pipeline
- * ownership from surface shading:
- *
- * - The material keeps a fallback depth/color pass so the old demo path remains
- *   functional.
- * - A higher-level UnderwaterSystem can now provide scene color/depth textures
- *   and camera-water state explicitly.
- *
- * Phase 2 will use these inputs to implement physically plausible Fresnel,
- * refraction, Beer-Lambert absorption, underwater transmission, and total
- * internal reflection.
+ * This class owns the FFT simulation textures because those are part of the
+ * water surface itself. The higher-level UnderwaterSystem owns the shared
+ * scene color/depth support passes and pushes those textures/state into this
+ * material.
  */
 export class WaterMaterial extends ShaderMaterial {
     /**
@@ -136,6 +128,19 @@ export class WaterMaterial extends ShaderMaterial {
     private submersion01 = 0;
 
     /**
+     * Water shader debug output mode.
+     *
+     * 0 = final shaded water
+     * 1 = raw depth
+     * 2 = estimated depth delta
+     * 3 = estimated water thickness
+     * 4 = background/no-depth mask
+     * 5 = Fresnel
+     * 6 = underwater amount
+     */
+    private waterDebugMode = 0;
+
+    /**
      * The elapsed time in seconds since the simulation started.
      * Starting at 0 creates some visual artefacts, so we start at 1 min to avoid them.
      */
@@ -165,14 +170,6 @@ export class WaterMaterial extends ShaderMaterial {
                 "waveHeightScale",
                 "choppinessScale",
                 "normalStrength",
-
-                /**
-                 * Future-facing water/underwater uniforms.
-                 *
-                 * The current fragment shader does not consume all of these yet,
-                 * but declaring them now lets Step 1B compile cleanly while Phase 2
-                 * can replace the shader with proper physical optics.
-                 */
                 "time",
                 "waterLevel",
                 "cameraDepthBelowWater",
@@ -182,7 +179,8 @@ export class WaterMaterial extends ShaderMaterial {
                 "isCameraUnderwater",
                 "isUnderwater",
                 "submersion01",
-                "underwaterAmount"
+                "underwaterAmount",
+                "waterDebugMode"
             ],
             samplers: [
                 "heightMap",
@@ -244,14 +242,11 @@ export class WaterMaterial extends ShaderMaterial {
         this.setFloat("normalStrength", this.settings.normalStrength);
 
         this.syncWaterStateUniforms();
+        this.syncDebugUniforms();
     }
 
     /**
      * Supplies the scene color texture used by the water shader for refraction.
-     *
-     * This is the preferred path when an UnderwaterSystem/OceanRenderPipeline owns
-     * the support passes. The fallback screenRenderTarget remains available for
-     * compatibility with the original demo architecture.
      */
     public setSceneColorTexture(texture: BaseTexture): void {
         this.usesExternalSceneColorTexture = true;
@@ -260,10 +255,6 @@ export class WaterMaterial extends ShaderMaterial {
 
     /**
      * Supplies the scene depth texture used by the water shader.
-     *
-     * This is the preferred path when an UnderwaterSystem/OceanRenderPipeline owns
-     * the support passes. Phase 2 will use this texture for linearized per-pixel
-     * water thickness.
      */
     public setSceneDepthTexture(texture: BaseTexture): void {
         this.usesExternalDepthTexture = true;
@@ -272,10 +263,6 @@ export class WaterMaterial extends ShaderMaterial {
 
     /**
      * Applies the frame state produced by UnderwaterSystem.
-     *
-     * The current shader only consumes a subset of these values, but keeping the
-     * water state centralized now avoids duplicated camera/depth/waterline logic
-     * when the physical optical shader arrives in Phase 2.
      */
     public setUnderwaterFrameState(state: WaterMaterialFrameState): void {
         if (state.sceneColorTexture !== undefined) {
@@ -339,6 +326,24 @@ export class WaterMaterial extends ShaderMaterial {
         this.setTexture("depthSampler", this.depthRenderer.getDepthMap());
     }
 
+    public setDebugMode(mode: number): void {
+        this.waterDebugMode = Math.max(0, Math.floor(mode));
+        this.syncDebugUniforms();
+    }
+
+    public getDebugMode(): number {
+        return this.waterDebugMode;
+    }
+
+    public cycleDebugMode(maxMode = 6): number {
+        const safeMaxMode = Math.max(0, Math.floor(maxMode));
+        const nextMode = this.waterDebugMode >= safeMaxMode ? 0 : this.waterDebugMode + 1;
+
+        this.setDebugMode(nextMode);
+
+        return this.waterDebugMode;
+    }
+
     /**
      * Update the material with the new state of the ocean simulation.
      * IFFT will be used to compute the height map, gradient map and displacement map for the current time.
@@ -367,6 +372,7 @@ export class WaterMaterial extends ShaderMaterial {
 
         this.setFloat("time", this.elapsedSeconds);
         this.syncWaterStateUniforms();
+        this.syncDebugUniforms();
 
         this.setMatrix("view", activeCamera.getViewMatrix());
         this.setMatrix("projection", activeCamera.getProjectionMatrix());
@@ -418,6 +424,10 @@ export class WaterMaterial extends ShaderMaterial {
 
         this.setFloat("submersion01", this.submersion01);
         this.setFloat("underwaterAmount", this.submersion01);
+    }
+
+    private syncDebugUniforms(): void {
+        this.setFloat("waterDebugMode", this.waterDebugMode);
     }
 
     private updateFallbackRenderLists(): void {

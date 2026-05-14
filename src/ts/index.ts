@@ -51,6 +51,16 @@ type ActiveMeshCollection = {
     data: AbstractMesh[];
 };
 
+const WATER_DEBUG_MODE_NAMES = [
+    "Final shaded water",
+    "Raw depth",
+    "Estimated depth delta",
+    "Estimated water thickness",
+    "Background/no-depth mask",
+    "Fresnel",
+    "Underwater amount"
+];
+
 function injectPerformanceHudStyles() {
     if (document.getElementById("ocean-performance-hud-styles")) return;
 
@@ -284,6 +294,11 @@ function createPerformanceHud(): PerformanceHudElements {
             <div class="ocean-performance-hud__row" data-hud="vertical-row">
                 <span class="ocean-performance-hud__value">Height</span>
                 <span class="ocean-performance-hud__inactive">Q / E</span>
+            </div>
+
+            <div class="ocean-performance-hud__row">
+                <span class="ocean-performance-hud__value">Water Debug</span>
+                <span class="ocean-performance-hud__inactive">T</span>
             </div>
         </div>
 
@@ -827,6 +842,13 @@ let boatTime = 0;
 
 const keyState: Record<string, boolean> = {};
 
+function logWaterDebugMode() {
+    const mode = waterMaterial.getDebugMode();
+    const label = WATER_DEBUG_MODE_NAMES[mode] ?? "Unknown";
+
+    console.info(`[Water Debug] ${mode}: ${label}`);
+}
+
 function setCameraMode(mode: CameraMode) {
     activeCameraMode = mode;
 
@@ -984,6 +1006,11 @@ window.addEventListener("keydown", (event) => {
     if (key === "1") setCameraMode("orbit");
     if (key === "2") setCameraMode("fly");
     if (key === "3") setCameraMode("boat");
+
+    if (key === "t" && !event.repeat) {
+        waterMaterial.cycleDebugMode(WATER_DEBUG_MODE_NAMES.length - 1);
+        logWaterDebugMode();
+    }
 });
 
 window.addEventListener("keyup", (event) => {
@@ -995,6 +1022,7 @@ performanceHud.flyMode.addEventListener("click", () => setCameraMode("fly"));
 performanceHud.boatMode.addEventListener("click", () => setCameraMode("boat"));
 
 setCameraMode("orbit");
+logWaterDebugMode();
 
 scene.executeWhenReady(() => {
     engine.loadingScreen.hideLoadingUI();
